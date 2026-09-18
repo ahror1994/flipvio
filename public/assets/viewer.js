@@ -407,7 +407,7 @@ function loadImg(src) {
 }
 
 function preloadNearby() {
-	for (const d of [-2, -1, 1, 2]) {
+	for (const d of [-3, -2, -1, 1, 2, 3]) {
 		const s = spreadPages(S.spread + d)
 		;[s.left, s.right].forEach((n) => n && loadImg(pageUrl(n)))
 	}
@@ -450,9 +450,12 @@ function setImage(el, n) {
 	if (el.dataset.page === key) return
 	el.dataset.page = key
 	if (n) {
+		// лёгкое мини-превью видно сразу, HD-страница догружается поверх
+		el.style.backgroundImage = 'url("' + (safeUrl(S.mf.pages[n - 1].thumb) || '') + '")'
 		el.src = pageUrl(n)
 		el.style.visibility = 'visible'
 	} else {
+		el.style.backgroundImage = ''
 		el.removeAttribute('src')
 		el.style.visibility = 'hidden'
 	}

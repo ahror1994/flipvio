@@ -156,7 +156,10 @@ html, body {
 	height: 100%;
 	width: 50%;
 	object-fit: fill;
-	background: #fff;
+	background-color: #fff;
+	background-size: 100% 100%;
+	background-position: center;
+	background-repeat: no-repeat;
 	user-select: none;
 	-webkit-user-drag: none;
 	display: block;
