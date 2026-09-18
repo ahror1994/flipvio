@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Flipvio — вход в кабинет</title>
+<link rel="stylesheet" href="/assets/login.css?v=1" />
+</head>
+<body>
+<div class="wrap">
+  <form class="card" id="loginForm" autocomplete="on">
+    <div class="logo">📖</div>
+    <h1>Flipvio</h1>
+    <p class="sub">Личный кабинет — только для владельца</p>
+
+    <label>Логин<input id="user" name="username" autocomplete="username" autofocus required /></label>
+    <label>Пароль<input id="pass" name="password" type="password" autocomplete="current-password" required /></label>
+
+    <div id="err" class="err" hidden></div>
+    <button type="submit" id="btn">Войти</button>
+  </form>
+</div>
+
+<script>
+const form = document.getElementById('loginForm')
+const err = document.getElementById('err')
+const btn = document.getElementById('btn')
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault()
+  err.hidden = true
+  btn.disabled = true
+  btn.textContent = 'Проверяю…'
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        login: document.getElementById('user').value,
+        password: document.getElementById('pass').value,
+      }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (res.ok) {
+      location.href = '/'
+      return
+    }
+    err.textContent = data.error || 'Неверный логин или пароль'
+    err.hidden = false
+    form.classList.remove('shake')
+    void form.offsetWidth
+    form.classList.add('shake')
+  } catch {
+    err.textContent = 'Сервер недоступен'
+    err.hidden = false
+  }
+  btn.disabled = false
+  btn.textContent = 'Войти'
+})
+</script>
+</body>
+</html>

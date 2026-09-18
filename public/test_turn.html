@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>TurnJS Test</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #1e1e1e;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #stage {
+    width: 100vw;
+    height: calc(100vh - 60px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: visible;
+  }
+  .flipbook-viewport {
+    position: relative;
+    overflow: visible;
+  }
+  .flipbook {
+    box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+  }
+  .flipbook .page {
+    background-color: #fff;
+    overflow: hidden;
+  }
+  .flipbook .page img {
+    width: 100%;
+    height: 100%;
+    object-fit: fill;
+    user-select: none;
+    -webkit-user-drag: none;
+  }
+  .flipbook .hard {
+    background: #2b2b2b;
+    box-shadow: none;
+  }
+</style>
+<script src="/assets/jquery.min.js"></script>
+<script src="/assets/turn.min.js"></script>
+</head>
+<body>
+<div id="stage">
+  <div class="flipbook-viewport">
+    <div id="flipbook" class="flipbook"></div>
+  </div>
+</div>
+
+<script>
+async function init() {
+  const res = await fetch('/api/books/каталог-2026-тест-d259ac');
+  const mf = await res.json();
+  const book = $('#flipbook');
+
+  const ratio = mf.page.height / mf.page.width;
+  const vh = window.innerHeight - 80;
+  const vw = window.innerWidth * 0.9;
+  let pageH = vh * 0.9;
+  let pageW = pageH / ratio;
+  if (pageW * 2 > vw) {
+    pageW = vw / 2;
+    pageH = pageW * ratio;
+  }
+  const totalW = Math.round(pageW * 2);
+  const totalH = Math.round(pageH);
+
+  for (let i = 1; i <= mf.pageCount; i++) {
+    const isHard = (i === 1 || i === mf.pageCount) && mf.settings.hardCover;
+    const pageEl = $('<div />', {
+      class: 'page ' + (isHard ? 'hard' : '')
+    });
+    const img = $('<img />', {
+      src: mf.pages[i - 1].normal,
+      draggable: 'false'
+    });
+    pageEl.append(img);
+    book.append(pageEl);
+  }
+
+  book.turn({
+    width: totalW,
+    height: totalH,
+    autoCenter: true,
+    duration: 800,
+    gradients: true,
+    elevation: 50,
+    acceleration: true,
+    when: {
+      turning: function(e, page, view) {
+        console.log('Turning to page', page);
+      },
+      turned: function(e, page, view) {
+        console.log('Turned to page', page);
+      }
+    }
+  });
+
+  window.book = book;
+}
+init();
+</script>
+</body>
+</html>

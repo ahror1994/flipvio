@@ -1,0 +1,17 @@
+# Зависимости
+node_modules/
+
+# Данные пользователей и секреты (создаются сервером автоматически)
+storage/
+server/.owner.json
+server/.session-secret
+
+# Временные отладочные скриншоты
+debug_*.png
+st_*.png
+webgl_*.png
+
+# Прочее
+*.log
+.DS_Store
+Thumbs.db

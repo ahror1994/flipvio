@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Flipvio</title>
+<link rel="stylesheet" href="/assets/viewer.css?v=42" />
+</head>
+<body>
+<div id="loader"><div class="spin"></div><span>Загрузка книги…</span></div>
+
+<div id="app">
+  <a id="brand" target="_blank" rel="noopener noreferrer" hidden><img alt="Логотип" /></a>
+  <div id="stage">
+    <button id="navLeft" class="nav-arrow" title="Назад (←)" aria-label="Назад">‹</button>
+    <div id="book">
+      <img id="imgLeft" alt="" draggable="false" />
+      <img id="imgRight" alt="" draggable="false" />
+      <div id="gutter"></div>
+      <canvas id="gl"></canvas>
+      <div id="overlays"></div>
+    </div>
+    <button id="navRight" class="nav-arrow" title="Вперёд (→)" aria-label="Вперёд">›</button>
+  </div>
+
+  <div id="toolbar">
+    <button data-act="panel" title="Миниатюры и оглавление" hidden>☰</button>
+    <button data-act="first" title="Первая страница">«</button>
+    <button data-act="prev" title="Назад (←)">‹</button>
+    <span id="pageBox"><input id="pageInput" inputmode="numeric" /> / <b id="pageTotal">0</b></span>
+    <button data-act="next" title="Вперёд (→)">›</button>
+    <button data-act="last" title="Последняя страница">»</button>
+    <i class="sep"></i>
+    <button data-act="zoom" title="Зум">⌕</button>
+    <button data-act="auto" title="Автолистание">▶</button>
+    <button data-act="sound" title="Звук">🔊</button>
+    <button data-act="single" title="Одна/две страницы">▭</button>
+    <button data-act="share" title="Поделиться">↗</button>
+    <button data-act="print" title="Печать">⎙</button>
+    <button data-act="download" title="Скачать PDF">⤓</button>
+    <button data-act="full" title="На весь экран">⛶</button>
+  </div>
+
+  <aside id="panel">
+    <header>
+      <nav class="tabs">
+        <button class="tab" data-tab="thumbs">Страницы</button>
+        <button class="tab" data-tab="toc" hidden>Оглавление</button>
+      </nav>
+      <button data-act="panel" title="Закрыть">×</button>
+    </header>
+    <div id="thumbList"></div>
+    <div id="tocList" hidden></div>
+  </aside>
+
+  <div id="zoomView" hidden style="display: none !important;">
+    <div id="zoomInner"><img id="zoomImg" alt="" /></div>
+    <button id="zoomClose">×</button>
+  </div>
+
+  <div id="shareView" hidden style="display: none !important;">
+    <div class="card">
+      <h3>Поделиться</h3>
+      <label>Ссылка на текущую страницу<input id="shareLink" readonly /></label>
+      <label>Код для встраивания<textarea id="shareEmbed" readonly rows="3"></textarea></label>
+      <div class="row"><button id="shareCopy">Копировать ссылку</button><button id="shareQr" data-act="qr">QR-код</button><button id="shareClose">Закрыть</button></div>
+      <div id="qrBox" hidden><p id="qrStatus" role="status"></p><img id="qrImg" alt="QR-код" /><div class="row"><button id="qrDownload" disabled>Скачать QR</button></div></div>
+    </div>
+  </div>
+</div>
+
+<script src="/assets/viewer.js?v=48"></script>
+</body>
+</html>

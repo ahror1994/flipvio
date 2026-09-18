@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Flipvio — Редактор</title>
+<link rel="stylesheet" href="/assets/editor.css" />
+</head>
+<body>
+<header>
+  <a href="/" class="brand">Flipvio</a><strong id="bookTitle">Редактор</strong>
+  <span id="saveState" role="status">Загрузка…</span>
+  <button id="undo" disabled>Отменить</button><button id="redo" disabled>Повторить</button>
+  <button id="save" class="primary" disabled>Сохранить</button>
+  <button id="preview" disabled>Сохранить и посмотреть</button>
+</header>
+<div id="message" role="alert" hidden></div>
+<fieldset id="workspace" disabled>
+  <aside class="pages-panel">
+    <h2>Страницы</h2>
+    <div class="row"><button id="addPage" title="Добавить пустую страницу">+ Пустая</button><button id="appendPages">Импорт</button></div>
+    <input id="pageFiles" type="file" aria-label="Импорт страниц" accept=".pdf,.jpg,.jpeg,.png,.webp,.gif" multiple hidden />
+    <p class="hint">Импорт добавляет изображения или страницы PDF, предварительно сохраняя изменения.</p>
+    <p class="hint" id="reorderHint">Перетаскивайте страницы за ручку «Переместить» или используйте стрелки вверх и вниз.</p>
+    <a href="#sectionsHeading">Настроить разделы и увидеть их страницы</a>
+    <div id="pageList" aria-label="Страницы книги" aria-describedby="reorderHint"></div>
+    <p id="pageMoveStatus" class="hint" role="status"></p>
+    <h2 id="sectionsHeading">Разделы книги (оглавление)</h2>
+    <p class="hint">Укажите название раздела и его начальную страницу. Раздел включает страницы от начальной до страницы перед следующим разделом в текущем порядке книги. После перемещения страниц границы обновляются. Разделы с одинаковым началом включают одни и те же страницы.</p>
+    <p class="hint">Например: «Салаты» начинаются на странице 2, «Супы» — на странице 5. Тогда к салатам относятся страницы 2–4, а к супам — с 5-й до следующего раздела.</p>
+    <div id="tocList"></div><button id="addToc">+ Раздел</button>
+  </aside>
+  <main>
+    <nav id="toolbar" aria-label="Инструменты элементов">
+      <button data-add="link">Ссылка</button><button data-add="text">Текст</button><button data-add="image">Изображение</button><button data-add="button">Кнопка</button><button data-add="shape">Фигура</button><button data-add="gif">GIF</button><button data-add="video">Видео</button><button data-add="audio">Аудио</button>
+      <span class="divider"></span><button id="cropMode" aria-pressed="false">Кадрирование</button><button id="backward" title="На один слой назад">Слой −</button><button id="forward" title="На один слой вперёд">Слой +</button><button id="duplicate">Дублировать</button><button id="deleteElement">Удалить</button>
+    </nav>
+    <div id="stage"><div id="canvas" aria-label="Холст страницы" tabindex="0"><img id="pageImage" alt="" draggable="false" hidden /><div id="elements"></div><div id="selection" hidden></div></div><p id="emptyPage" hidden>Добавьте страницу, чтобы начать редактирование.</p></div>
+    <footer id="canvasInfo">Координаты относительно страницы: от 0 до 1.</footer>
+  </main>
+  <aside class="properties-panel">
+    <details open><summary>Свойства элемента</summary><div id="properties"><p class="hint">Выберите элемент на странице.</p></div></details>
+    <details open><summary>Страница</summary><div id="pageProperties"></div></details>
+    <details><summary>Слои</summary><div id="layerList"></div></details>
+    <details><summary>Настройки книги</summary><div id="settings"></div></details>
+  </aside>
+</fieldset>
+<script src="/assets/editor.js"></script>
+</body>
+</html>

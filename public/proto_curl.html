@@ -1,0 +1,179 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+body { margin: 0; background: #16181d; display: flex; align-items: center; justify-content: center; height: 100vh; }
+canvas { box-shadow: 0 20px 50px rgba(0,0,0,0.7); }
+</style>
+</head>
+<body>
+<canvas id="gl" width="1200" height="800"></canvas>
+<script>
+const canvas = document.getElementById('gl');
+const gl = canvas.getContext('webgl2', { antialias: true, alpha: true });
+
+const vs = `#version 300 es
+in vec2 aPos; // [0, 1] x [0, 1]
+out vec2 vUv;
+out vec3 vNorm;
+out float vZ;
+
+uniform vec2 uPage;      // W, H in px
+uniform vec2 uViewport;  // Canvas W, H
+uniform float uDir;      // +1 = right to left, -1 = left to right
+uniform float uAngle;    // angle of curl axis in radians (-PI/2 to PI/2)
+uniform float uProgress; // 0 to 1
+uniform float uRadius;   // curl radius in px
+
+const float PI = 3.141592653589793;
+
+void main() {
+    vUv = aPos;
+    float W = uPage.x;
+    float H = uPage.y;
+
+    float x0 = aPos.x * W;
+    float y0 = (aPos.y - 0.5) * H;
+
+    float ca = cos(uAngle);
+    float sa = sin(uAngle);
+
+    float s = x0 * ca + y0 * sa;
+    float t = -x0 * sa + y0 * ca;
+
+    // Conical taper: tighter near grabbed corner
+    float R = max(14.0, uRadius * (1.0 + 0.35 * (t / H)));
+
+    float maxS = W * abs(ca) + (H * 0.5) * abs(sa);
+    float minS = - (H * 0.5) * abs(sa);
+
+    float s0 = mix(maxS + 2.0, minS - PI * R - 8.0, uProgress);
+
+    float d = s - s0;
+
+    vec3 pLocal;
+    vec3 nLocal;
+
+    if (d <= 0.0) {
+        pLocal = vec3(x0, y0, 0.0);
+        nLocal = vec3(0.0, 0.0, 1.0);
+    } else if (d < PI * R) {
+        float phi = d / R;
+        float sCurled = s0 + R * sin(phi);
+        float zCurled = R * (1.0 - cos(phi));
+
+        float xC = sCurled * ca - t * sa;
+        float yC = sCurled * sa + t * ca;
+
+        pLocal = vec3(xC, yC, zCurled);
+        nLocal = vec3(-sin(phi) * ca, -sin(phi) * sa, cos(phi));
+    } else {
+        float dPast = d - PI * R;
+        float sTurned = s0 - dPast;
+        float zTurned = 2.0 * R * exp(-dPast * 0.006);
+
+        float xT = sTurned * ca - t * sa;
+        float yT = sTurned * sa + t * ca;
+
+        pLocal = vec3(xT, yT, zTurned);
+        nLocal = vec3(0.0, 0.0, -1.0);
+    }
+
+    float anchor = smoothstep(0.0, min(W * 0.15, 60.0), x0);
+    pLocal = mix(vec3(x0, y0, 0.0), pLocal, anchor);
+    nLocal = normalize(mix(vec3(0.0, 0.0, 1.0), nLocal, anchor));
+
+    if (uDir < 0.0) {
+        pLocal.x = -pLocal.x;
+        nLocal.x = -nLocal.x;
+    }
+
+    vNorm = nLocal;
+    vZ = pLocal.z;
+
+    float scale = 1.0 + 0.16 * (pLocal.z / W);
+    vec2 pos = vec2(pLocal.x, pLocal.y) * scale;
+
+    vec2 clip = vec2(pos.x / (uViewport.x * 0.5), -pos.y / (uViewport.y * 0.5));
+    gl_Position = vec4(clip, 0.0, 1.0);
+}
+`;
+
+const fs = `#version 300 es
+precision highp float;
+in vec2 vUv;
+in vec3 vNorm;
+in float vZ;
+out vec4 fragColor;
+
+void main() {
+    bool isFront = vNorm.z >= 0.0;
+    vec3 N = normalize(isFront ? vNorm : -vNorm);
+
+    vec3 L = normalize(vec3(-0.35, -0.45, 1.2));
+    float diff = max(0.0, dot(N, L));
+    float light = mix(0.68, 1.18, diff);
+
+    vec3 V = vec3(0.0, 0.0, 1.0);
+    vec3 H = normalize(L + V);
+    float spec = pow(max(0.0, dot(N, H)), 24.0) * 0.14;
+
+    float shadow = clamp(1.0 - (vZ / 250.0) * 0.12, 0.72, 1.0);
+
+    vec3 col = isFront ? vec3(0.97, 0.96, 0.94) : vec3(0.90, 0.92, 0.95);
+
+    float grid = step(0.96, fract(vUv.y * 18.0)) + step(0.97, fract(vUv.x * 12.0));
+    col = mix(col, vec3(0.4, 0.55, 0.7), grid * 0.35);
+
+    fragColor = vec4(col * light * shadow + spec, 1.0);
+}
+`;
+
+function createShader(type, src) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    return s;
+}
+
+const prog = gl.createProgram();
+gl.attachShader(prog, createShader(gl.VERTEX_SHADER, vs));
+gl.attachShader(prog, createShader(gl.FRAGMENT_SHADER, fs));
+gl.linkProgram(prog);
+gl.useProgram(prog);
+
+const NX = 240, NY = 120;
+const verts = [];
+for (let i = 0; i < NX; i++) {
+    const u0 = i / NX, u1 = (i + 1) / NX;
+    for (let j = 0; j < NY; j++) {
+        const v0 = j / NY, v1 = (j + 1) / NY;
+        verts.push(u0, v0, u1, v0, u1, v1, u0, v0, u1, v1, u0, v1);
+    }
+}
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.STATIC_DRAW);
+const loc = gl.getAttribLocation(prog, 'aPos');
+gl.enableVertexAttribArray(loc);
+gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+
+window.render = function(progVal, angleVal, radiusVal, dirVal) {
+    gl.viewport(0, 0, 1200, 800);
+    gl.clearColor(0.08, 0.09, 0.12, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    gl.uniform2f(gl.getUniformLocation(prog, 'uPage'), 500.0, 700.0);
+    gl.uniform2f(gl.getUniformLocation(prog, 'uViewport'), 1200.0, 800.0);
+    gl.uniform1f(gl.getUniformLocation(prog, 'uProgress'), progVal);
+    gl.uniform1f(gl.getUniformLocation(prog, 'uAngle'), angleVal);
+    gl.uniform1f(gl.getUniformLocation(prog, 'uRadius'), radiusVal);
+    gl.uniform1f(gl.getUniformLocation(prog, 'uDir'), dirVal || 1.0);
+
+    gl.drawArrays(gl.TRIANGLES, 0, verts.length / 2);
+};
+</script>
+</body>
+</html>

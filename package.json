@@ -1,0 +1,16 @@
+{
+  "name": "flipvio",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Self-hosted 3D flipbook platform",
+  "scripts": {
+    "start": "node server/index.js",
+    "sounds": "python tools/make-sounds.py"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
+  }
+}

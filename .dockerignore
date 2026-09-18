@@ -1,0 +1,9 @@
+**/node_modules
+**/storage
+**/.owner.json
+**/.owner.json.*
+**/.env
+**/.env.*
+**/*.key
+**/*.pem
+.git

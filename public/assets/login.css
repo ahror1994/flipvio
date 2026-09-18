@@ -1,0 +1,38 @@
+:root { --accent: #2783de; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(120% 120% at 50% 0%, #2b2b2b, #161616);
+  font: 14px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif; color: #eee;
+}
+.wrap { width: 100%; max-width: 380px; padding: 20px; }
+.card {
+  background: #1e1e1e; border: 1px solid rgba(255,255,255,.1); border-radius: 16px;
+  padding: 30px 28px; display: flex; flex-direction: column; gap: 14px;
+  box-shadow: 0 24px 60px rgba(0,0,0,.5);
+}
+.logo { font-size: 34px; text-align: center; }
+h1 { margin: 0; text-align: center; font-size: 24px; letter-spacing: .5px; }
+.sub { margin: -6px 0 6px; text-align: center; color: #999; font-size: 12.5px; }
+label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: #9a9a9a; }
+input {
+  background: #121212; border: 1px solid rgba(255,255,255,.14); border-radius: 9px;
+  color: #eee; padding: 11px 12px; font-size: 14px; outline: none;
+}
+input:focus { border-color: var(--accent); }
+button {
+  margin-top: 6px; padding: 12px; border: 0; border-radius: 9px;
+  background: var(--accent); color: #fff; font-size: 15px; font-weight: 600; cursor: pointer;
+}
+button:hover { filter: brightness(1.1); }
+button:disabled { opacity: .6; cursor: wait; }
+.err {
+  background: rgba(220,60,60,.12); border: 1px solid rgba(220,60,60,.4);
+  color: #ff9c9c; border-radius: 8px; padding: 9px 12px; font-size: 13px;
+}
+.shake { animation: shake .35s; }
+@keyframes shake {
+  20% { transform: translateX(-7px); } 40% { transform: translateX(6px); }
+  60% { transform: translateX(-4px); } 80% { transform: translateX(3px); }
+}

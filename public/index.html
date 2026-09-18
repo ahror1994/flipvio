@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Flipvio — мои публикации</title>
+<link rel="stylesheet" href="/assets/dashboard.css?v=4" />
+</head>
+<body>
+<header>
+  <h1>Flipvio</h1>
+  <span>SuperAdmin · Свои 3D-флипбуки из PDF и картинок</span>
+  <span style="flex:1"></span>
+  <button id="logout" class="ghost" type="button">Выйти</button>
+</header>
+
+<main>
+  <section id="drop">
+    <h2>Загрузить публикацию</h2>
+    <p>Перетащите PDF сюда или выберите картинки — каждая станет страницей. Новая публикация сохраняется как черновик и открывается в редакторе.</p>
+    <input id="file" type="file" accept=".pdf,image/*" multiple hidden />
+    <input id="title" placeholder="Название (необязательно)" />
+    <button id="pick">Выбрать файлы</button>
+    <div id="progress" hidden><div class="bar"><i></i></div><span>Обработка…</span></div>
+  </section>
+
+  <section>
+    <h2>Публикации</h2>
+    <div id="books"></div>
+  </section>
+</main>
+
+<div id="editor" hidden>
+  <form class="card" id="editorForm">
+    <h3>Настройки книги</h3>
+    <label>Название книги<input name="title" required maxlength="300" /></label>
+    <label>Название в ссылке<input name="publicSlug" required aria-describedby="publicLinkPreview publicLinkHint" autocomplete="off" spellcheck="false" /></label>
+    <p id="publicLinkPreview" class="link-hint"></p>
+    <p id="publicLinkHint" class="link-hint">Не меняет название книги. 2–80 букв латиницы или кириллицы, цифры и дефисы внутри. Старые ссылки продолжат работать после сохранения.</p>
+    <p id="settingsError" role="alert" hidden></p>
+    <label class="publish-check"><input type="checkbox" name="published" /> Опубликовано</label>
+    <div class="grid">
+      <label>Фон верх<input type="color" name="bgColor" /></label>
+      <label>Фон низ<input type="color" name="bgColor2" /></label>
+      <label>Акцент<input type="color" name="accent" /></label>
+      <label>Длительность перелистывания, мс<input type="number" name="flipDuration" min="100" max="5000" step="1" /></label>
+      <label>Автолистание, сек (0 = выкл)<input type="number" name="autoFlipSeconds" min="0" max="3600" /></label>
+      <label>Режим страниц
+        <select name="singlePageMode">
+          <option value="auto">Авто (мобильные — одна)</option>
+          <option value="always">Всегда одна</option>
+          <option value="never">Всегда разворот</option>
+        </select>
+      </label>
+    </div>
+    <div class="grid">
+      <div class="asset-field">
+        <label>Изображение фона<input type="file" accept=".png,.jpg,.jpeg,.webp,.gif" data-asset="backgroundImage" /></label>
+        <input type="hidden" name="backgroundImage" />
+        <small data-asset-status="backgroundImage">Не выбрано</small>
+        <button type="button" data-clear-asset="backgroundImage">Убрать</button>
+      </div>
+      <div class="asset-field">
+        <label>Логотип<input type="file" accept=".png,.jpg,.jpeg,.webp,.gif" data-asset="logoUrl" /></label>
+        <input type="hidden" name="logoUrl" />
+        <small data-asset-status="logoUrl">Не выбрано</small>
+        <button type="button" data-clear-asset="logoUrl">Убрать</button>
+      </div>
+      <label>Ссылка логотипа<input name="logoLink" maxlength="2048" placeholder="https://, mailto:, tel:" /></label>
+      <label>Ширина логотипа, пикс.<input type="number" name="logoWidth" min="0" max="1000" /></label>
+    </div>
+    <div class="checks">
+      <label><input type="checkbox" name="flipSound" /> Звук перелистывания</label>
+      <label><input type="checkbox" name="hardCover" /> Твёрдая обложка</label>
+      <label><input type="checkbox" name="rtl" /> Листать справа налево</label>
+      <label><input type="checkbox" name="showThumbnails" /> Панель миниатюр</label>
+      <label><input type="checkbox" name="allowDownload" /> Разрешить скачивание</label>
+      <label><input type="checkbox" name="allowPrint" /> Разрешить печать</label>
+    </div>
+    <div class="row">
+      <button type="submit">Сохранить</button>
+      <button type="button" id="editorClose">Отмена</button>
+    </div>
+  </form>
+</div>
+
+<script src="/assets/dashboard.js?v=4"></script>
+</body>
+</html>
