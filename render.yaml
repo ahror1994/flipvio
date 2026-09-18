@@ -10,5 +10,7 @@ services:
     envVars:
       - key: FLIPVIO_STORAGE
         value: /data
+      - key: TRUST_PROXY
+        value: '1' # сайт за прокси Render: включает Secure-флаг у cookie сессии
       - key: ADMIN_PASS
         sync: false # пароль администратора вводится при создании сервиса (12+ символов)
