@@ -133,12 +133,12 @@ void main() {
 	float light = mix(mix(0.62, 1.0, diff), 1.0, flatness);
 	vec3 V = vec3(0.0, 0.0, 1.0);
 	vec3 H = normalize(L + V);
-	float spec = pow(max(0.0, dot(N, H)), 18.0) * 0.04 * (1.0 - flatness);
+	float spec = pow(max(0.0, dot(N, H)), 18.0) * 0.07 * (1.0 - flatness);
 	float R = max(1.0, uRadius);
 	float crest = 0.5 * PI * R;
 	float inCurl = step(0.0, vS) * step(vS, PI * R);
 	float glossDist = (vS - crest) / (0.35 * PI * R);
-	float gloss = exp(-glossDist * glossDist) * inCurl * 0.06 * (1.0 - flatness);
+	float gloss = exp(-glossDist * glossDist) * inCurl * 0.18 * (1.0 - flatness);
 	float depthShadow = clamp(1.0 - (vZ / 220.0) * 0.18, 0.65, 1.0);
 	vec2 uv;
 	if (uDir > 0.0) {
@@ -612,12 +612,22 @@ function applySettings() {
 		if (STATIC) $('#shareQr').hidden = true
 }
 
+let glHideToken = 0
 function finishTurn() {
 	pendingDraw = null
-	$('#gl').classList.remove('on')
 	S.animating = false
 	if (S.layoutPending) layout()
 	renderSpread()
+	// не гасим WebGL-кадр, пока страницы разворота не проявились — иначе виден скачок на мини-превью
+	const token = ++glHideToken
+	const started = performance.now()
+	const waitHide = () => {
+		if (token !== glHideTimer || S.animating || S.dragging) return
+		const loading = [$('#imgLeft'), $('#imgRight')].some((im) => im.getAttribute('src') && (!im.complete || !im.naturalWidth))
+		if (loading && performance.now() - started < 2500) return requestAnimationFrame(waitHide)
+		$('#gl').classList.remove('on')
+	}
+	requestAnimationFrame(waitHide)
 }
 
 function setSpread(target) {
