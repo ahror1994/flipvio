@@ -9,7 +9,7 @@ const DEFAULT_SETTINGS = {
 	singlePageMode: 'auto',
 	bgColor: '#2b2b2b',
 	bgColor2: '#161616',
-	accent: '#2783de',
+	accent: '#1e40af',
 	showThumbnails: true,
 	allowDownload: true,
 	allowPrint: true,

@@ -319,7 +319,7 @@ function renderProperties() {
 	colorField(root, 'Цвет', element.color || '#000000', (value) => set('color', value))
 	colorField(root, 'Фон', element.background || 'transparent', (value) => set('background', value))
 	if (element.type === 'link') field(root, 'Невидимая ссылка', element.background === 'transparent' && !element.text, (value) => change(() => {
-		element.background = value ? 'transparent' : '#2783de'
+		element.background = value ? 'transparent' : '#1e40af'
 		if (value) element.text = ''
 	}), { type: 'checkbox' })
 	if (['text', 'link', 'button'].includes(element.type)) field(root, 'Размер шрифта, пикс.', element.fontSize || 16, (value) => set('fontSize', value), { type: 'number', min: 1, max: 500 })
@@ -715,7 +715,7 @@ function addElement(type) {
 	change(() => {
 		const element = { id: uid('element'), type, x: .1, y: .1, w: .3, h: type === 'text' || type === 'link' || type === 'button' || type === 'audio' ? .1 : .25, opacity: 1, borderRadius: 0 }
 		if (['text', 'button'].includes(type)) Object.assign(element, { text: type === 'text' ? 'Ваш текст' : 'Кнопка', fontSize: 24, color: type === 'text' ? '#000000' : '#ffffff' })
-		if (['shape', 'button'].includes(type)) Object.assign(element, { background: '#2783de', shape: 'rect' })
+		if (['shape', 'button'].includes(type)) Object.assign(element, { background: '#1e40af', shape: 'rect' })
 		if (type === 'link') Object.assign(element, { background: 'transparent', text: '', url: null })
 		if (mediaTypes.includes(type)) Object.assign(element, { src: null, objectFit: 'contain' })
 		page().elements.push(element)

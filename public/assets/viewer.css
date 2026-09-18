@@ -1,7 +1,7 @@
 :root {
 	--bg1: #2b2b2b;
 	--bg2: #161616;
-	--accent: #2783de;
+	--accent: #1e40af;
 	--bar: rgba(20, 20, 20, 0.85);
 }
 * { box-sizing: border-box; }
@@ -232,6 +232,10 @@ html, body {
 #toolbar button {
 	width: 38px;
 	height: 38px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0;
 	border: 0;
 	border-radius: 8px;
 	background: transparent;
@@ -242,6 +246,15 @@ html, body {
 }
 #toolbar button:hover { background: rgba(255,255,255,.12); }
 #toolbar button.active { background: var(--accent); color: #fff; }
+#toolbar .i {
+	width: 18px;
+	height: 18px;
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 2;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
 #toolbar .sep { width: 1px; height: 22px; background: rgba(255,255,255,.16); margin: 0 6px; }
 #pageBox { display: flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
 #pageInput {
@@ -299,7 +312,7 @@ html, body {
 #thumbList { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 14px 12px; }
 #thumbList img { width: 100%; border-radius: 4px; cursor: pointer; background: #fff; border: 2px solid transparent; transition: transform .15s, border-color .15s; }
 #thumbList img:hover { transform: scale(1.04); }
-#thumbList img.cur { border-color: var(--accent); box-shadow: 0 0 10px rgba(39, 131, 222, 0.5); }
+#thumbList img.cur { border-color: var(--accent); box-shadow: 0 0 10px rgba(30, 64, 175, 0.5); }
 #tocList button {
 	display: block;
 	width: 100%;

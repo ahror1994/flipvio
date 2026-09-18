@@ -570,7 +570,7 @@ function applySettings() {
 	const settings = S.mf.settings
 	document.body.classList.toggle('print-disabled', settings.allowPrint === false)
 	document.documentElement.style.setProperty('--page-ratio', S.mf.page.width / S.mf.page.height)
-	for (const [key, variable, fallback] of [['bgColor', '--bg1', '#2b2b2b'], ['bgColor2', '--bg2', '#161616'], ['accent', '--accent', '#2783de']]) document.documentElement.style.setProperty(variable, color(settings[key], fallback))
+	for (const [key, variable, fallback] of [['bgColor', '--bg1', '#2b2b2b'], ['bgColor2', '--bg2', '#161616'], ['accent', '--accent', '#1e40af']]) document.documentElement.style.setProperty(variable, color(settings[key], fallback))
 	const background = safeUrl(settings.backgroundImage)
 	if (background) $('#app').style.backgroundImage = 'url(' + JSON.stringify(background) + ')'
 	const logo = safeUrl(settings.logoUrl)
@@ -599,7 +599,7 @@ function applySettings() {
 	$('.tab[data-tab="thumbs"]').hidden = !thumbsEnabled
 	$('.tab[data-tab="toc"]').hidden = !hasToc
 	document.querySelectorAll('[data-act="panel"]').forEach((el) => { el.hidden = !(thumbsEnabled || hasToc) })
-	switchTab(thumbsEnabled || !hasToc ? 'thumbs' : 'toc')
+	switchTab(hasToc ? 'toc' : 'thumbs')
 	$('#pageInput').setAttribute('aria-label', 'Текущая страница')
 	document.querySelectorAll('#toolbar button').forEach((button) => button.setAttribute('aria-label', button.title))
 }
