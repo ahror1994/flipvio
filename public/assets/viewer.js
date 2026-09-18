@@ -2,6 +2,10 @@ const $ = (sel) => document.querySelector(sel)
 const rawSlug = location.pathname.split('/').filter(Boolean).pop() || ''
 const slug = decodeURIComponent(rawSlug)
 const EMBED = location.pathname.startsWith('/embed/')
+// статический режим (GitHub Pages): манифест и ресурсы лежат рядом с книгой, бэкенда нет
+const STATIC = document.body.dataset.static !== undefined
+const ROOT = document.body.dataset.root || ''
+const MANIFEST_URL = document.body.dataset.manifest
 
 const S = {
 	mf: null,
@@ -30,7 +34,7 @@ const Sfx = {
 	},
 	init() {
 		try {
-			this.audio = new Audio('/assets/sfx/flip.mp3')
+			this.audio = new Audio(ROOT + '/assets/sfx/flip.mp3')
 			this.audio.preload = 'auto'
 			this.audio.load()
 		} catch (_) {}
@@ -603,8 +607,9 @@ function applySettings() {
 	$('.tab[data-tab="toc"]').hidden = !hasToc
 	document.querySelectorAll('[data-act="panel"]').forEach((el) => { el.hidden = !(thumbsEnabled || hasToc) })
 	switchTab(hasToc ? 'toc' : 'thumbs')
-	$('#pageInput').setAttribute('aria-label', 'Текущая страница')
-	document.querySelectorAll('#toolbar button').forEach((button) => button.setAttribute('aria-label', button.title))
+		$('#pageInput').setAttribute('aria-label', 'Текущая страница')
+		document.querySelectorAll('#toolbar button').forEach((button) => button.setAttribute('aria-label', button.title))
+		if (STATIC) $('#shareQr').hidden = true
 }
 
 function finishTurn() {
@@ -1190,6 +1195,17 @@ function closeZoom() {
 function openShare() {
 	pauseMedia()
 	const n = S.currentPage
+	if (STATIC) {
+		$('#shareLink').value = location.href.split('#')[0] + '#p=' + n
+		$('#shareEmbed').value = '<iframe src="' + location.href.split('#')[0] + '" width="100%" height="600" frameborder="0" allowfullscreen></iframe>'
+		$('#qrBox').hidden = true
+		$('#shareQr').hidden = true
+		const el = $('#shareView')
+		el.removeAttribute('hidden')
+		el.classList.add('open')
+		el.style.setProperty('display', 'flex', 'important')
+		return
+	}
 	const path = S.mf.url || '/b/' + encodeURIComponent(S.mf.publicSlug || S.mf.slug)
 	const base = new URL(path, location.origin).href
 	const embed = new URL(path.replace(/^\/b\//, '/embed/'), location.origin).href
@@ -1363,7 +1379,7 @@ function initUi() {
 async function init() {
 	const initialHash = location.hash.match(/#p=(\d+)/)
 	try {
-		const res = await fetch('/api/books/' + encodeURIComponent(slug))
+		const res = await fetch(STATIC ? MANIFEST_URL : '/api/books/' + encodeURIComponent(slug))
 		if (!res.ok) throw new Error('Не удалось загрузить книгу: ' + res.status)
 		S.mf = await res.json()
 		if (!Array.isArray(S.mf.pages) || !S.mf.pages.length) throw new Error('В книге пока нет страниц')
