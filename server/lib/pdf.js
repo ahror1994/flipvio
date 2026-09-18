@@ -11,18 +11,38 @@ function run(cmd, args, opts = {}) {
 	})
 }
 
-// Проверяем доступность poppler/magick
+// ImageMagick: 'magick' (IM7) или 'convert' (Debian, IM6); null — imagemagick нет
+let magickCmd
+async function detectMagick() {
+	if (magickCmd !== undefined) return magickCmd
+	for (const candidate of ['magick', 'convert']) {
+		try {
+			await run(candidate, ['-version'])
+			magickCmd = candidate
+			return candidate
+		} catch {}
+	}
+	magickCmd = null
+	return null
+}
+
+// Проверяем доступность poppler/imagemagick
 let hasPoppler = null
 async function checkPoppler() {
 	if (hasPoppler !== null) return hasPoppler
 	try {
 		await run('pdfinfo', ['-v'])
-		await run('magick', ['-version'])
-		hasPoppler = true
+		hasPoppler = (await detectMagick()) !== null
 	} catch {
 		hasPoppler = false
 	}
 	return hasPoppler
+}
+
+// `magick identify ...` (IM7) → `identify ...` (IM6)
+function runImageTool(args) {
+	if (args[0] === 'identify' && magickCmd === 'convert') return run('identify', args.slice(1))
+	return run(magickCmd, args)
 }
 
 // Количество страниц и геометрия страницы в пунктах (как meta.pageWidth у FlipHTML5)
@@ -63,7 +83,7 @@ async function makeThumbs(normalDir, thumbDir, count, height = 220) {
 	for (let i = 1; i <= count; i++) {
 		const src = path.join(normalDir, 'page-' + i + '.jpg')
 		if (!fs.existsSync(src)) continue
-		await run('magick', [
+		await runImageTool([
 			src,
 			'-resize', 'x' + height,
 			'-strip',
@@ -74,7 +94,7 @@ async function makeThumbs(normalDir, thumbDir, count, height = 220) {
 }
 
 async function pixelSize(file) {
-	const { stdout } = await run('magick', ['identify', '-format', '%w %h', file])
+	const { stdout } = await runImageTool(['identify', '-format', '%w %h', file])
 	const [w, h] = stdout.trim().split(/\s+/).map(Number)
 	return { width: w, height: h }
 }
@@ -83,7 +103,7 @@ async function pixelSize(file) {
 function getPythonExe() {
 	const venvPy = path.join(__dirname, '..', '..', '..', 'nexorai-flip-studio', '.venv', 'Scripts', 'python.exe')
 	if (fs.existsSync(venvPy)) return venvPy
-	return 'python'
+	return process.platform === 'win32' ? 'python' : 'python3'
 }
 
 async function runPythonRasterizer(args) {
@@ -143,9 +163,9 @@ async function processImages({ imagePaths, outRoot, publicBase }) {
 		const size = await pixelSize(src)
 		if (!Number.isFinite(size.width * size.height) || size.width * size.height > 20000000) throw Object.assign(new Error('Image exceeds pixel limits'), { status: 413 })
 		const n = i + 1
-		await run('magick', [src, '-resize', 'x1200>', '-strip', '-quality', '82', path.join(dirs.normal, 'page-' + n + '.jpg')])
-		await run('magick', [src, '-resize', 'x2200>', '-strip', '-quality', '88', path.join(dirs.large, 'page-' + n + '.jpg')])
-		await run('magick', [src, '-resize', 'x220', '-strip', '-quality', '78', path.join(dirs.thumb, 'page-' + n + '.jpg')])
+		await runImageTool([src, '-resize', 'x1200>', '-strip', '-quality', '82', path.join(dirs.normal, 'page-' + n + '.jpg')])
+		await runImageTool([src, '-resize', 'x2200>', '-strip', '-quality', '88', path.join(dirs.large, 'page-' + n + '.jpg')])
+		await runImageTool([src, '-resize', 'x220', '-strip', '-quality', '78', path.join(dirs.thumb, 'page-' + n + '.jpg')])
 	}
 
 	const px = await pixelSize(path.join(dirs.normal, 'page-1.jpg'))
