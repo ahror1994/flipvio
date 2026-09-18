@@ -1,0 +1,14 @@
+# Конфигурация для автодеплоя на Render (https://render.com)
+# Кнопка "Deploy to Render" в README использует этот файл.
+services:
+  - type: web
+    name: flipvio
+    runtime: docker
+    plan: free # для постоянного хранения книг переведи на starter и добавь диск
+    healthCheckPath: /healthz
+    autoDeploy: true # каждый push в GitHub = автоматическое обновление сайта
+    envVars:
+      - key: FLIPVIO_STORAGE
+        value: /data
+      - key: ADMIN_PASS
+        sync: false # пароль администратора вводится при создании сервиса (12+ символов)

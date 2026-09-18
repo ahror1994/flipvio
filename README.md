@@ -1,5 +1,7 @@
 ﻿# Flipvio
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/ahror1994/flipvio)
+
 Рабочий self-hosted аналог FlipHTML5 для публикации интерактивных 3D-флипбуков из PDF и изображений.
 Проект реализован без внешних npm-зависимостей на базе Node.js встроенных модулей, WebGL2 (шейдерная деформация листа) и Web Audio API.
 
