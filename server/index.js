@@ -215,7 +215,8 @@ const server = http.createServer(async (req, res) => {
 			}
 			if (match[2] === 'source.pdf' && book.pdfUrl && (sessionOf(req) || book.settings?.allowDownload !== false)) full = safeJoin(STORAGE, book.slug + '/source.pdf')
 			if (!full) fail('Not found', 404)
-			return serveFile(req, res, full, 'private, no-store')
+			// картинки книг версионируются (v-uuid), содержимое не меняется — кэшируем навсегда
+			return serveFile(req, res, full, 'public, max-age=31536000, immutable')
 		}
 		if (p === '/login' || p === '/login.html') {
 			if (sessionOf(req)) return redirect(res, '/')
