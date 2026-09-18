@@ -18,8 +18,8 @@ const jobs = []
 const db = JSON.parse(fs.readFileSync(new URL('../storage/db.json', import.meta.url), 'utf8'))
 const pdfBooks = [
   { localSlug: 'каталог-2026-тест-d259ac', slug: 'каталог-2026-тест', toc: [
-    { title: 'салаты', pageId: 'page-24' },
-    { title: 'салаты', pageId: 'page-21' },
+    { title: 'салаты', page: 24 },
+    { title: 'салаты', page: 21 },
   ] },
   { localSlug: 'коммерческое-предложение-и-договор-на-ра-a79d9a', slug: 'коммерческое-предложение' },
 ]
@@ -49,8 +49,13 @@ for (const job of jobs) {
   const book = await up.json()
   console.log('ok, ' + book.pageCount + ' стр.')
   const patch = { published: true }
-  if (job.toc) patch.toc = job.toc
+  if (job.toc) {
+    // ID страниц генерируются при конвертации — берём их из свежего манифеста
+    const { randomUUID } = await import('node:crypto')
+    const man = await (await fetch(api('/api/books/' + encodeURIComponent(book.slug)), { headers: auth })).json()
+    patch.toc = job.toc.map((t) => ({ id: randomUUID(), title: t.title, pageId: man.pages[t.page - 1]?.id })).filter((t) => t.pageId)
+  }
   const pp = await fetch(api('/api/books/' + encodeURIComponent(book.slug)), { method: 'PATCH', headers: { ...auth, 'content-type': 'application/json' }, body: JSON.stringify(patch) })
-  console.log(pp.ok ? '  опубликована' + (job.toc ? ' + оглавление' : '') : '  ошибка публикации: ' + pp.status)
+  console.log(pp.ok ? '  опубликована' + (job.toc ? ' + оглавление' : '') : '  ошибка публикации: ' + pp.status + ' ' + (await pp.text()).slice(0, 150))
 }
 console.log('Готово.')
