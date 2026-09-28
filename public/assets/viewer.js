@@ -1138,7 +1138,11 @@ const Pinch = {
 		})
 		const up = (e) => {
 			if (!this.pointers.delete(e.pointerId)) return
-			if (this.pointers.size === 1) this.lastPoint = [...this.pointers.values()][0]
+			if (this.pointers.size === 1) {
+				// остался один палец — переходим в панорамирование
+				this.active = false
+				this.lastPoint = [...this.pointers.values()][0]
+			}
 			if (this.pointers.size === 0) {
 				this.active = false
 				this.lastPoint = null
