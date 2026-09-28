@@ -29,13 +29,17 @@ for (const item of pdfBooks) {
   if (local && fs.existsSync(pdf)) jobs.push({ title: local.title, slug: item.slug, files: [{ name: 'source.pdf', type: 'application/pdf', buf: fs.readFileSync(pdf) }], toc: item.toc })
 }
 
-// 2. Книга из фотографий (восстанавливается из бэкапа large-страниц)
-const backupDir = 'C:/Users/ahror/.flipvio-backup/суши-студио'
-if (fs.existsSync(backupDir + '/manifest.json')) {
-  const files = fs.readdirSync(backupDir + '/large').filter((f) => f.endsWith('.jpg'))
+// 2. Книги из фотографий (восстанавливаются из бэкапов large-страниц)
+const IMAGE_BOOKS = [
+  { title: 'Суши студио', slug: 'суши-студио', publicSlug: 'sushi', backup: 'C:/Users/ahror/.flipvio-backup/суши-студио-7991ba74e753' },
+  { title: '01', slug: '01', publicSlug: '01', backup: 'C:/Users/ahror/.flipvio-backup/01-ea2b874e1bfe' },
+]
+for (const item of IMAGE_BOOKS) {
+  if (!fs.existsSync(item.backup + '/manifest.json')) { console.error('Нет бэкапа: ' + item.backup); continue }
+  const files = fs.readdirSync(item.backup + '/large').filter((f) => f.endsWith('.jpg'))
     .sort((a, b) => Number(a.match(/\d+/)[0]) - Number(b.match(/\d+/)[0]))
-    .map((f) => ({ name: f, type: 'image/jpeg', buf: fs.readFileSync(backupDir + '/large/' + f) }))
-  jobs.push({ title: 'суши студио', slug: 'суши-студио', files })
+    .map((f) => ({ name: f, type: 'image/jpeg', buf: fs.readFileSync(item.backup + '/large/' + f) }))
+  jobs.push({ title: item.title, slug: item.slug, files, publicSlug: item.publicSlug })
 }
 
 for (const job of jobs) {
@@ -49,6 +53,7 @@ for (const job of jobs) {
   const book = await up.json()
   console.log('ok, ' + book.pageCount + ' стр.')
   const patch = { published: true }
+  if (job.publicSlug) patch.publicSlug = job.publicSlug
   if (job.toc) {
     // ID страниц генерируются при конвертации — берём их из свежего манифеста
     const { randomUUID } = await import('node:crypto')

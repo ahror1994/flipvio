@@ -88,7 +88,7 @@ async function makeThumbs(normalDir, thumbDir, count, height = 220) {
 			'-resize', 'x' + height,
 			'-strip',
 			'-interlace', 'plane',
-			'-quality', '75',
+			'-quality', '78',
 			path.join(thumbDir, 'page-' + i + '.jpg'),
 		])
 	}
@@ -164,9 +164,9 @@ async function processImages({ imagePaths, outRoot, publicBase }) {
 		const size = await pixelSize(src)
 		if (!Number.isFinite(size.width * size.height) || size.width * size.height > 20000000) throw Object.assign(new Error('Image exceeds pixel limits'), { status: 413 })
 		const n = i + 1
-		await runImageTool([src, '-resize', 'x1200>', '-strip', '-interlace', 'plane', '-quality', '80', path.join(dirs.normal, 'page-' + n + '.jpg')])
-		await runImageTool([src, '-resize', 'x2200>', '-strip', '-interlace', 'plane', '-quality', '85', path.join(dirs.large, 'page-' + n + '.jpg')])
-		await runImageTool([src, '-resize', 'x220', '-strip', '-interlace', 'plane', '-quality', '75', path.join(dirs.thumb, 'page-' + n + '.jpg')])
+		await runImageTool([src, '-resize', 'x1200>', '-strip', '-interlace', 'plane', '-quality', '82', path.join(dirs.normal, 'page-' + n + '.jpg')])
+		await runImageTool([src, '-resize', 'x2200>', '-strip', '-interlace', 'plane', '-quality', '88', path.join(dirs.large, 'page-' + n + '.jpg')])
+		await runImageTool([src, '-resize', 'x220', '-strip', '-interlace', 'plane', '-quality', '78', path.join(dirs.thumb, 'page-' + n + '.jpg')])
 	}
 
 	const px = await pixelSize(path.join(dirs.normal, 'page-1.jpg'))

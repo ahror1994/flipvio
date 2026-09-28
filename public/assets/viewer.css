@@ -147,6 +147,11 @@ html, body {
 #book.has-left::before {
 	display: block;
 }
+/* Пинч-зум книги пальцами (мобильные) */
+#book.pinch {
+	transform: translate(var(--pinch-x, 0px), var(--pinch-y, 0px)) scale(var(--pinch-s, 1)) !important;
+	z-index: 40;
+}
 #book.single::before {
 	display: none !important;
 }
@@ -403,6 +408,10 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
 	#toolbar button { width: 44px; height: 44px; flex-basis: 44px; }
 	#toolbar .sep { display: none; }
 	.nav-arrow { display: none; }
+	/* blur дорого обходится слабым GPU телефонов */
+	#toolbar, #panel { backdrop-filter: none; }
+	#toolbar { background: rgba(18, 18, 22, 0.96); }
+	#panel { background: rgba(14, 14, 18, 0.98); }
 }
 @media (hover: none), (any-pointer: coarse) {
 	#book, #book:active { cursor: default; }

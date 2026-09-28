@@ -16,6 +16,7 @@ const S = {
 	sound: true,
 	animating: false,
 	dragging: false,
+	pinch: false,
 	auto: null,
 	sizes: { w: 0, h: 0 },
 	tex: new Map(),
@@ -221,8 +222,9 @@ const GL = {
 		gl.linkProgram(sProg)
 		if (!gl.getProgramParameter(sProg, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(sProg))
 		this.shadowProg = sProg
-		const NX = 240
-		const NY = 120
+		const mobileGrid = Math.min(innerWidth, innerHeight) < 820 || matchMedia('(pointer: coarse)').matches
+		const NX = mobileGrid ? 150 : 240
+		const NY = mobileGrid ? 75 : 120
 		const verts = []
 		for (let i = 0; i < NX; i++) {
 			const u0 = i / NX
@@ -268,7 +270,7 @@ const GL = {
 	draw({ front, back, fold, dir = 1, page = S.sizes, viewport = S.sizes }) {
 		const gl = this.gl
 		if (!gl || !front || !back || !fold) return
-		const dpr = window.devicePixelRatio || 1
+		const dpr = Math.min(window.devicePixelRatio || 1, 2)
 		const cw = Math.max(1, Math.round(viewport.w * dpr))
 		const ch = Math.max(1, Math.round(viewport.h * dpr))
 		if (gl.canvas.width !== cw || gl.canvas.height !== ch) {
@@ -876,7 +878,7 @@ function prepareUnderlay(forward, target) {
 }
 
 async function flip(forward, opts = {}) {
-	if (S.animating || S.dragging) return
+	if (S.animating || S.dragging || S.pinch) return
 	const target = S.spread + (forward ? 1 : -1)
 	if (target < 0 || target > maxSpread()) return
 	const cur = spreadPages(S.spread)
@@ -987,7 +989,7 @@ const Hover = {
 		return best
 	},
 	async check(e, book) {
-		if (S.animating || S.dragging || !GL.gl || e.pointerType === 'touch' || matchMedia('(any-pointer: coarse)').matches || !matchMedia('(hover: hover)').matches || e.target.closest('a, button, video, audio, .interactive')) return
+		if (S.animating || S.dragging || S.pinch || !GL.gl || e.pointerType === 'touch' || matchMedia('(any-pointer: coarse)').matches || !matchMedia('(hover: hover)').matches || e.target.closest('a, button, video, audio, .interactive')) return
 		const now = performance.now()
 		if (now - this.lastCheck < 16) return
 		this.lastCheck = now
@@ -1058,6 +1060,97 @@ const Hover = {
 	},
 }
 
+// Пинч-зум на сенсорных экранах: два пальца — 100–300%, один палец — панорама, возврат в 100% сжатием
+const Pinch = {
+	pointers: new Map(),
+	active: false,
+	scale: 1,
+	startDist: 1,
+	startScale: 1,
+	startCenter: null,
+	basePan: null,
+	pan: { x: 0, y: 0 },
+	lastPoint: null,
+	reset() {
+		this.scale = 1
+		this.pan = { x: 0, y: 0 }
+		this.active = false
+		this.lastPoint = null
+		S.pinch = false
+		this.apply()
+	},
+	apply() {
+		const book = $('#book')
+		if (this.scale > 1.02) {
+			const stage = $('#stage')
+			const lim = stage.clientWidth * 0.75
+			this.pan.x = clamp(this.pan.x, -lim, lim)
+			this.pan.y = clamp(this.pan.y, -lim, lim)
+			book.classList.add('pinch')
+			book.style.setProperty('--pinch-s', this.scale.toFixed(3))
+			book.style.setProperty('--pinch-x', this.pan.x.toFixed(1) + 'px')
+			book.style.setProperty('--pinch-y', this.pan.y.toFixed(1) + 'px')
+			S.pinch = true
+		} else {
+			book.classList.remove('pinch')
+			book.style.removeProperty('--pinch-s')
+			book.style.removeProperty('--pinch-x')
+			book.style.removeProperty('--pinch-y')
+			S.pinch = false
+		}
+	},
+	dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y) },
+	init() {
+		const stage = $('#stage')
+		stage.addEventListener('pointerdown', (e) => {
+			if (e.pointerType === 'mouse') return
+			this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
+			if (this.pointers.size === 2 && !S.animating) {
+				const [a, b] = [...this.pointers.values()]
+				this.active = true
+				this.startDist = Math.max(1, this.dist(a, b))
+				this.startScale = this.scale
+				this.startCenter = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
+				this.basePan = { ...this.pan }
+				Hover.cancel()
+			}
+		})
+		window.addEventListener('pointermove', (e) => {
+			if (!this.pointers.has(e.pointerId)) return
+			this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
+			if (this.active && this.pointers.size >= 2) {
+				const [a, b] = [...this.pointers.values()]
+				this.scale = clamp(this.startScale * this.dist(a, b) / this.startDist, 1, 3)
+				const c = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
+				this.pan.x = this.basePan.x + (c.x - this.startCenter.x)
+				this.pan.y = this.basePan.y + (c.y - this.startCenter.y)
+				this.lastPoint = null
+				this.apply()
+			} else if (!this.active && this.scale > 1 && this.pointers.size === 1) {
+				const p = [...this.pointers.values()][0]
+				if (this.lastPoint) {
+					this.pan.x += p.x - this.lastPoint.x
+					this.pan.y += p.y - this.lastPoint.y
+					this.apply()
+				}
+				this.lastPoint = p
+			}
+		})
+		const up = (e) => {
+			if (!this.pointers.delete(e.pointerId)) return
+			if (this.pointers.size === 1) this.lastPoint = [...this.pointers.values()][0]
+			if (this.pointers.size === 0) {
+				this.active = false
+				this.lastPoint = null
+				if (this.scale <= 1.02) this.reset()
+			}
+		}
+		window.addEventListener('pointerup', up)
+		window.addEventListener('pointercancel', up)
+		stage.addEventListener('dblclick', () => { if (this.scale > 1) this.reset() })
+	},
+}
+
 function initDrag() {
 	const book = $('#book')
 	const canvas = $('#gl')
@@ -1103,23 +1196,20 @@ function initDrag() {
 
 	const onMove = (e) => {
 		lastEvent = e
+		if (S.pinch) return
 		if (startInfo && e.pointerId !== startInfo.pointerId) return
 		if (!drag) {
 			if (!startInfo) return
 			const dx = e.clientX - startInfo.clientX
 			const dy = e.clientY - startInfo.clientY
 			if (Math.hypot(dx, dy) > 7) {
-				if (S.single && Math.abs(dx) <= Math.abs(dy)) {
-					window.removeEventListener('pointermove', onMove)
-					window.removeEventListener('pointerup', onUp)
-					window.removeEventListener('pointercancel', onUp)
-					startInfo = null
-					return
-				}
 				if (S.single) {
+					// листаем только явным горизонтальным жестом — иначе это скролл/зум
+					if (Math.abs(dx) < Math.abs(dy) * 1.25) return
 					startInfo.forward = e.clientX < startInfo.clientX
 					startInfo.backward = !startInfo.forward
-					startInfo.grab = pagePoint(e, startInfo.rect, startInfo.forward)
+					// захват всегда у свободного края страницы — сгиб получается ровным
+					startInfo.grab = { x: S.sizes.w, y: pagePoint(e, startInfo.rect, startInfo.forward).y }
 				}
 				S.dragging = true
 				Hover.cancel()
@@ -1160,6 +1250,11 @@ function initDrag() {
 		drag = null
 		lastEvent = null
 		S.dragging = false
+		if (S.pinch) {
+			// жест прерван пинч-зумом — аккуратно возвращаем лист
+			if (d) settle(d, false)
+			return
+		}
 		if (!d || !d.moved) {
 			if (si && e.type !== 'pointercancel' && !S.animating) {
 				if (si.forward) flip(true)
@@ -1183,7 +1278,7 @@ function initDrag() {
 		}
 	})
 	book.addEventListener('pointerdown', (e) => {
-		if (S.animating || startInfo || e.button !== 0 || e.isPrimary === false || e.target.closest('button, input, a, video, audio, .interactive')) return
+		if (S.animating || S.pinch || startInfo || e.button !== 0 || e.isPrimary === false || e.target.closest('button, input, a, video, audio, .interactive')) return
 		const r = book.getBoundingClientRect()
 		const x = (e.clientX - r.left) / r.width
 		const forward = S.single ? x >= 0.35 : x >= 0.5
@@ -1440,6 +1535,7 @@ async function init() {
 		buildThumbs()
 		layout()
 		initDrag()
+		Pinch.init()
 		initUi()
 		if (initialHash) goToPage(parseInt(initialHash[1], 10))
 		else renderSpread()
