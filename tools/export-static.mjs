@@ -8,7 +8,7 @@ const fs = await import('node:fs')
 const path = await import('node:path')
 
 // постоянные короткие адреса на Pages: префикс слага -> имя
-const NAMES = [['суши', 'sushi'], ['01', '01']]
+const NAMES = [['суши', 'sushi']]
 
 const api = (p) => base.replace(/\/$/, '') + p
 const loginRes = await fetch(api('/api/login'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ login, password }) })

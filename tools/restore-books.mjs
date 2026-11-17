@@ -26,7 +26,6 @@ for (const item of pdfBooks) {
 // 2. Книги из фотографий (восстанавливаются из бэкапов large-страниц)
 const IMAGE_BOOKS = [
   { title: 'Суши студио', slug: 'суши-студио', publicSlug: 'sushi', backup: 'C:/Users/ahror/.flipvio-backup/суши-студио-7991ba74e753' },
-  { title: '01', slug: '01', publicSlug: '01', backup: 'C:/Users/ahror/.flipvio-backup/01-ea2b874e1bfe' },
 ]
 for (const item of IMAGE_BOOKS) {
   if (!fs.existsSync(item.backup + '/manifest.json')) { console.error('Нет бэкапа: ' + item.backup); continue }
