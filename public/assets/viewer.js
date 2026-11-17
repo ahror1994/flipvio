@@ -19,6 +19,8 @@ const S = {
 	animating: false,
 	dragging: false,
 	pinch: false,
+	queuedFlip: null,
+	turnProgress: 0,
 	auto: null,
 	sizes: { w: 0, h: 0 },
 	tex: new Map(),
@@ -32,34 +34,46 @@ const S = {
 }
 
 const Sfx = {
-	audio: null,
+	pool: [],
+	idx: 0,
 	lastPlay: -Infinity,
 	unlocked: false,
 	unlock(e) {
 		if (!e.isTrusted) return
 		this.unlocked = true
-		if (S.sound && !this.audio) this.init()
+		if (S.sound && !this.pool.length) this.init()
 	},
 	init() {
+		if (this.pool.length) return
 		try {
-			this.audio = new Audio(ROOT + '/assets/sfx/flip.mp3')
-			this.audio.preload = 'auto'
-			this.audio.load()
+			for (let i = 0; i < 3; i++) {
+				const a = new Audio(ROOT + '/assets/sfx/flip.mp3')
+				a.preload = 'auto'
+				a.preservesPitch = false
+				a.load()
+				this.pool.push(a)
+			}
 		} catch (_) {}
 	},
-	play() {
+	play(cover = false) {
 		if (!S.sound || !this.unlocked) return
 		const now = performance.now()
-		if (now - this.lastPlay < 500) return
+		if (now - this.lastPlay < 90) return
 		this.lastPlay = now
 		try {
-			if (!this.audio) this.init()
-			if (this.audio) {
-				this.audio.currentTime = 0
-				const p = this.audio.play()
+			if (!this.pool.length) this.init()
+			const a = this.pool[this.idx++ % this.pool.length]
+			if (a) {
+				a.currentTime = 0
+				a.playbackRate = cover ? 0.88 : 0.94 + Math.random() * 0.12
+				a.volume = cover ? 0.95 : 0.82
+				const p = a.play()
 				if (p && typeof p.catch === 'function') p.catch(() => {})
 			}
 		} catch (_) {}
+	},
+	stopAll() {
+		this.pool.forEach((a) => { try { a.pause() } catch (_) {} })
 	},
 }
 
@@ -83,15 +97,13 @@ void main() {
 	vUv = aGrid;
 	float W = uPage.x;
 	float H = uPage.y;
-	float x0 = aGrid.x * W;
-	float y0 = (aGrid.y - 0.5) * H;
-	vec2 P = vec2(x0, y0);
+	vec2 P = vec2(aGrid.x * W, (aGrid.y - 0.5) * H);
 	vec2 A = normalize(uFoldDir);
 	vec2 N = normalize(uFoldNormal);
 	vec2 F = uFoldPoint;
 	float s = dot(P - F, N);
 	float t = dot(P - F, A);
-	float R = max(1.0, uRadius);
+	float R = max(0.35, uRadius);
 	float phi = s / R;
 	vec3 pLocal;
 	vec3 nLocal;
@@ -105,8 +117,13 @@ void main() {
 		nLocal = vec3(-N * sn, cs);
 	} else {
 		float extra = s - PI * R;
-		pLocal = vec3(F + A * t - N * extra, 2.0 * R);
-		nLocal = vec3(0.0, 0.0, -1.0);
+		float drapeScale = max(90.0, W * 1.2);
+		float decay = exp(-extra / drapeScale);
+		float zFlap = 2.0 * R * (0.18 + 0.82 * decay);
+		float dzds = -2.0 * R * 0.82 * decay / drapeScale;
+		float xyScale = sqrt(max(0.92, 1.0 - dzds * dzds));
+		pLocal = vec3(F + A * t - N * (extra * xyScale), zFlap);
+		nLocal = normalize(vec3(-N * dzds, -1.0));
 	}
 	if (uDir < 0.0) {
 		pLocal.x = -pLocal.x;
@@ -116,8 +133,12 @@ void main() {
 	vNorm = nLocal;
 	vZ = pLocal.z;
 	vS = s;
-	vec2 clip = vec2(pLocal.x / (uViewport.x * 0.5), -pLocal.y / (uViewport.y * 0.5));
-	gl_Position = vec4(clip, clamp(0.5 - vZ / 1000.0, 0.0, 1.0), 1.0);
+	float zLift = pLocal.z * smoothstep(0.55, 2.5, R);
+	float camZ = max(950.0, W * 3.2);
+	float persp = camZ / max(220.0, camZ - zLift);
+	vec2 proj = pLocal.xy * persp;
+	vec2 clip = vec2(proj.x / (uViewport.x * 0.5), -proj.y / (uViewport.y * 0.5));
+	gl_Position = vec4(clip, clamp(0.5 - vZ / 1200.0, 0.0, 1.0), 1.0);
 }`
 
 const FRAG = `#version 300 es
@@ -130,24 +151,37 @@ uniform sampler2D uFront;
 uniform sampler2D uBack;
 uniform float uDir;
 uniform float uRadius;
+uniform float uSingle;
+uniform vec2 uPage;
 out vec4 outColor;
 const float PI = 3.141592653589793;
 void main() {
 	bool isFront = vNorm.z >= 0.0;
 	vec3 N = normalize(isFront ? vNorm : -vNorm);
-	vec3 L = normalize(vec3(-0.35, -0.45, 1.25));
-	float diff = max(0.0, dot(N, L));
 	float flatness = clamp(N.z, 0.0, 1.0);
-	float light = mix(mix(0.62, 1.0, diff), 1.0, flatness);
+
+	vec3 L1 = normalize(vec3(-0.32, -0.42, 1.28));
+	vec3 L2 = normalize(vec3(0.45, 0.25, 0.95));
+	float diff = 0.78 * max(0.0, dot(N, L1)) + 0.22 * max(0.0, dot(N, L2));
+	float light = mix(mix(0.58, 1.04, diff), 1.0, pow(flatness, 1.5));
+
 	vec3 V = vec3(0.0, 0.0, 1.0);
-	vec3 H = normalize(L + V);
-	float spec = pow(max(0.0, dot(N, H)), 18.0) * 0.07 * (1.0 - flatness);
-	float R = max(1.0, uRadius);
-	float crest = 0.5 * PI * R;
+	vec3 H1 = normalize(L1 + V);
+	float spec = pow(max(0.0, dot(N, H1)), 26.0) * 0.10 * (1.0 - flatness);
+	float R = max(0.35, uRadius);
+	float crest = 0.46 * PI * R;
 	float inCurl = step(0.0, vS) * step(vS, PI * R);
-	float glossDist = (vS - crest) / (0.35 * PI * R);
-	float gloss = exp(-glossDist * glossDist) * inCurl * 0.18 * (1.0 - flatness);
-	float depthShadow = clamp(1.0 - (vZ / 220.0) * 0.18, 0.65, 1.0);
+	float glossDist = (vS - crest) / max(1.0, 0.34 * PI * R);
+	float gloss = exp(-glossDist * glossDist) * inCurl * 0.20 * (1.0 - flatness) * smoothstep(2.0, 14.0, R);
+
+	float curlCrease = smoothstep(0.35 * PI, 0.85 * PI, vS / R) * inCurl;
+	float curlAO = 1.0 - 0.22 * curlCrease * smoothstep(2.0, 16.0, R);
+
+	float depthShadow = clamp(1.0 - (vZ / 260.0) * 0.12, 0.76, 1.0);
+	float gutterW = clamp(30.0 / max(1.0, uPage.x), 0.03, 0.12);
+	float gutterT = 1.0 - clamp(vUv.x / gutterW, 0.0, 1.0);
+	float gutterShade = mix(1.0, 1.0 - 0.34 * gutterT * gutterT, (1.0 - uSingle) * (1.0 - clamp(vZ / 45.0, 0.0, 1.0)));
+
 	vec2 uv;
 	if (uDir > 0.0) {
 		uv = isFront ? vUv : vec2(1.0 - vUv.x, vUv.y);
@@ -155,7 +189,14 @@ void main() {
 		uv = isFront ? vec2(1.0 - vUv.x, vUv.y) : vUv;
 	}
 	vec4 base = isFront ? texture(uFront, uv) : texture(uBack, uv);
-	outColor = vec4(base.rgb * light * depthShadow + spec + gloss, base.a);
+	vec3 col = base.rgb * light * depthShadow * curlAO * gutterShade + spec + gloss;
+
+	float px = 1.35 / max(1.0, uPage.x);
+	float py = 1.35 / max(1.0, uPage.y);
+	float edge = max(smoothstep(1.0 - px, 1.0, vUv.x), max(smoothstep(py, 0.0, vUv.y), smoothstep(1.0 - py, 1.0, vUv.y)));
+	col = mix(col, vec3(0.97, 0.97, 0.96), edge * smoothstep(2.5, 16.0, vZ) * 0.35);
+
+	outColor = vec4(col, base.a);
 }`
 
 const SHADOW_VERT = `#version 300 es
@@ -165,33 +206,58 @@ uniform vec2 uPage;
 uniform vec2 uViewport;
 uniform float uPan;
 uniform float uDir;
+uniform vec2 uShadowX;
 out vec2 vLocal;
 void main() {
-	float W = uPage.x;
-	float H = uPage.y;
-	vec2 P = vec2(aQuad.x * W, (aQuad.y - 0.5) * H);
-	vLocal = P;
-	if (uDir < 0.0) P.x = -P.x;
-	P.x += uPan;
+	vec2 Pbook = vec2(mix(uShadowX.x, uShadowX.y, aQuad.x), (aQuad.y - 0.5) * uPage.y);
+	vLocal = vec2(uDir < 0.0 ? -Pbook.x : Pbook.x, Pbook.y);
+	vec2 P = vec2(Pbook.x + uPan, Pbook.y);
 	vec2 clip = vec2(P.x / (uViewport.x * 0.5), -P.y / (uViewport.y * 0.5));
-	gl_Position = vec4(clip, 0.8, 1.0);
+	gl_Position = vec4(clip, 0.85, 1.0);
 }`
 
 const SHADOW_FRAG = `#version 300 es
 precision highp float;
 in vec2 vLocal;
+uniform vec2 uPage;
 uniform vec2 uFoldPoint;
+uniform vec2 uFoldDir;
 uniform vec2 uFoldNormal;
 uniform float uRadius;
+uniform float uDir;
 out vec4 outColor;
+const float PI = 3.141592653589793;
 void main() {
-	float s = dot(vLocal - uFoldPoint, uFoldNormal);
-	float R = max(1.0, uRadius);
-	float flatSide = exp(-max(0.0, -s) / (R * 1.35));
-	float liftedSide = exp(-max(0.0, s) / (R * 2.2)) * 0.45;
-	float a = (0.34 * flatSide + 0.16 * liftedSide) * (1.0 - smoothstep(0.0, 1.0, s / (R * 5.0)));
-	if (a < 0.012) discard;
-	outColor = vec4(0.0, 0.0, 0.0, min(a, 0.55));
+	float R = max(0.35, uRadius);
+	float fade = smoothstep(0.8, 5.0, R);
+	if (fade <= 0.001) discard;
+
+	vec2 A = normalize(uFoldDir);
+	vec2 N = normalize(uFoldNormal);
+	float s = dot(vLocal - uFoldPoint, N);
+
+	float cylShadow = 0.36 * exp(-max(0.0, s) / max(1.0, R * 1.2)) * smoothstep(-R * 0.35, R * 0.2, s);
+
+	float hApprox = clamp(R * 1.35, 6.0, 96.0);
+	vec2 shifted = vLocal - vec2(uDir * 0.14, 0.18) * hApprox;
+	float sShift = dot(shifted - uFoldPoint, N);
+	float tShift = dot(shifted - uFoldPoint, A);
+	float s0 = PI * R - sShift;
+	float flapShadow = 0.0;
+	if (s0 >= 0.72 * PI * R) {
+		vec2 P0 = uFoldPoint + A * tShift + N * s0;
+		vec2 halfP = uPage * 0.5;
+		vec2 q = abs(P0 - vec2(halfP.x, 0.0)) - halfP;
+		float dRect = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
+		float extra = max(0.0, s0 - PI * R);
+		float hEst = 2.0 * R * (0.18 + 0.82 * exp(-extra / max(90.0, uPage.x * 1.2)));
+		float penumbra = clamp(hEst * 0.45, 5.0, 44.0);
+		flapShadow = 0.32 * (1.0 - smoothstep(-penumbra * 0.3, penumbra, dRect));
+	}
+
+	float a = max(cylShadow, flapShadow) * fade;
+	if (a < 0.008) discard;
+	outColor = vec4(0.0, 0.0, 0.0, min(a, 0.48));
 }`
 
 const GL = {
@@ -244,8 +310,8 @@ const GL = {
 		gl.linkProgram(sProg)
 		if (!gl.getProgramParameter(sProg, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(sProg))
 		this.shadowProg = sProg
-		for (const name of ['uPage', 'uViewport', 'uPan', 'uDir', 'uFoldPoint', 'uFoldDir', 'uFoldNormal', 'uRadius', 'uFront', 'uBack']) this.u[name] = gl.getUniformLocation(prog, name)
-		for (const name of ['uPage', 'uViewport', 'uPan', 'uDir', 'uFoldPoint', 'uFoldNormal', 'uRadius']) this.shadowU[name] = gl.getUniformLocation(sProg, name)
+		for (const name of ['uPage', 'uViewport', 'uPan', 'uDir', 'uFoldPoint', 'uFoldDir', 'uFoldNormal', 'uRadius', 'uSingle', 'uFront', 'uBack']) this.u[name] = gl.getUniformLocation(prog, name)
+		for (const name of ['uPage', 'uViewport', 'uPan', 'uDir', 'uFoldPoint', 'uFoldDir', 'uFoldNormal', 'uRadius', 'uShadowX']) this.shadowU[name] = gl.getUniformLocation(sProg, name)
 		this.pageLoc = gl.getAttribLocation(prog, 'aGrid')
 		this.shadowLoc = gl.getAttribLocation(sProg, 'aQuad')
 
@@ -321,7 +387,7 @@ const GL = {
 		trimCache(S.tex, 12, (texture) => gl.deleteTexture(texture))
 		return t
 	},
-	draw({ front, back, fold, dir = 1, page = S.sizes, viewport = S.sizes }) {
+	draw({ front, back, fold, dir = 1, page = S.sizes, viewport = S.sizes, shadowX }) {
 		const gl = this.gl
 		if (!gl || gl.isContextLost() || !front || !back || !fold) return
 		const dpr = Math.min(window.devicePixelRatio || 1, 2)
@@ -337,13 +403,17 @@ const GL = {
 		gl.disable(gl.DEPTH_TEST)
 		gl.enable(gl.BLEND)
 		gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
-		if (fold.radius > 2.0) {
+		const pan = S.single ? -dir * page.w * 0.5 : 0
+		if (fold.radius > 0.8) {
+			const sx = shadowX || (S.single ? (dir > 0 ? [0, page.w] : [-page.w, 0]) : [-page.w, page.w])
 			gl.useProgram(this.shadowProg)
 			gl.uniform2f(this.shadowU.uPage, page.w, page.h)
 			gl.uniform2f(this.shadowU.uViewport, viewport.w, viewport.h)
-			gl.uniform1f(this.shadowU.uPan, S.single ? -dir * page.w * 0.5 : 0)
+			gl.uniform1f(this.shadowU.uPan, pan)
 			gl.uniform1f(this.shadowU.uDir, dir)
+			gl.uniform2f(this.shadowU.uShadowX, sx[0], sx[1])
 			gl.uniform2f(this.shadowU.uFoldPoint, fold.point.x, fold.point.y)
+			gl.uniform2f(this.shadowU.uFoldDir, fold.dir.x, fold.dir.y)
 			gl.uniform2f(this.shadowU.uFoldNormal, fold.normal.x, fold.normal.y)
 			gl.uniform1f(this.shadowU.uRadius, fold.radius)
 			gl.bindVertexArray(this.shadowVao)
@@ -356,8 +426,9 @@ const GL = {
 		gl.depthMask(true)
 		gl.uniform2f(this.u.uPage, page.w, page.h)
 		gl.uniform2f(this.u.uViewport, viewport.w, viewport.h)
-		gl.uniform1f(this.u.uPan, S.single ? -dir * page.w * 0.5 : 0)
+		gl.uniform1f(this.u.uPan, pan)
 		gl.uniform1f(this.u.uDir, dir)
+		gl.uniform1f(this.u.uSingle, S.single ? 1 : 0)
 		gl.uniform2f(this.u.uFoldPoint, fold.point.x, fold.point.y)
 		gl.uniform2f(this.u.uFoldDir, fold.dir.x, fold.dir.y)
 		gl.uniform2f(this.u.uFoldNormal, fold.normal.x, fold.normal.y)
@@ -376,9 +447,12 @@ const smoothstep = (a, b, v) => {
 	const t = clamp((v - a) / (b - a), 0, 1)
 	return t * t * (3 - 2 * t)
 }
-const easePaper = (t) => 0.5 - 0.5 * Math.cos(t * Math.PI)
-const FINGER_HEIGHT = 46
-const MIN_RADIUS = 1.5
+const easeTurn = (t) => {
+	const u = Math.pow(clamp(t, 0, 1), 0.88)
+	return u * u * (3 - 2 * u)
+}
+const easeOutCubic = (t) => 1 - Math.pow(1 - clamp(t, 0, 1), 3)
+const MIN_RADIUS = 0.5
 const MAX_RADIUS = 220
 
 function spreadPages(idx) {
@@ -622,6 +696,52 @@ function upgradeVisibleToLarge() {
 	}
 }
 
+function coverOffsetFor(idx) {
+	if (S.single) return 0
+	const { left, right } = spreadPages(idx)
+	return !left ? -0.25 : !right ? 0.25 : 0
+}
+
+function isCoverTurn(fromIdx, toIdx) {
+	if (S.single) return fromIdx === 0 || toIdx === 0 || fromIdx >= maxSpread() || toIdx >= maxSpread()
+	const a = spreadPages(fromIdx)
+	const b = spreadPages(toIdx)
+	return !a.left || !a.right || !b.left || !b.right
+}
+
+function updateCoverGlide(target, completion) {
+	if (S.single) return
+	const a = coverOffsetFor(S.spread)
+	const b = coverOffsetFor(target)
+	if (a === b) return
+	const book = $('#book')
+	const offset = a + (b - a) * smoothstep(0, 1, completion)
+	book.style.left = Math.round(book.offsetWidth * offset) + 'px'
+}
+
+function shadowBounds(forward, target) {
+	const W = S.sizes.w
+	if (S.single) return forward ? [0, W] : [-W, 0]
+	const cur = spreadPages(S.spread)
+	const nxt = spreadPages(target)
+	const leftPage = forward ? cur.left : nxt.left
+	const rightPage = forward ? nxt.right : cur.right
+	return [leftPage ? -W : 0, rightPage ? W : 0]
+}
+
+let nudgeTimer = null
+function nudgeBook(dir) {
+	if (S.pinch) return
+	const book = $('#book')
+	clearTimeout(nudgeTimer)
+	book.style.setProperty('--nudge-x', (dir > 0 ? -10 : 10) + 'px')
+	book.classList.add('nudge')
+	nudgeTimer = setTimeout(() => {
+		book.classList.remove('nudge')
+		book.style.removeProperty('--nudge-x')
+	}, 160)
+}
+
 function renderSpread() {
 	const { left, right } = spreadPages(S.spread)
 	setImage($('#imgLeft'), left)
@@ -630,8 +750,13 @@ function renderSpread() {
 	book.classList.toggle('cover-front', !S.single && S.spread === 0)
 	book.classList.toggle('cover-back', !S.single && S.spread >= maxSpread() && !right)
 	book.classList.toggle('has-left', Boolean(left))
-	const coverOffset = S.single ? 0 : !left ? -0.25 : !right ? 0.25 : 0
-	book.style.left = Math.round(book.offsetWidth * coverOffset) + 'px'
+	const total = Math.max(1, maxSpread())
+	const ratio = S.spread / total
+	const leftStack = S.single || S.spread === 0 ? 0 : Math.round(2 + 6 * ratio)
+	const rightStack = S.spread >= total && !right ? 0 : Math.round(2 + 6 * (1 - ratio))
+	book.style.setProperty('--stack-left', leftStack + 'px')
+	book.style.setProperty('--stack-right', rightStack + 'px')
+	book.style.left = Math.round(book.offsetWidth * coverOffsetFor(S.spread)) + 'px'
 	if (![left, right].includes(S.currentPage)) S.currentPage = right || left || 1
 	const cur = S.currentPage
 	renderOverlays(left, right)
@@ -775,13 +900,21 @@ let glHideToken = 0
 function finishTurn() {
 	pendingDraw = null
 	S.animating = false
+	S.turnProgress = 0
 	if (S.layoutPending) layout()
 	renderSpread()
+	const runQueued = () => {
+		if (S.queuedFlip === null) return
+		const nextForward = S.queuedFlip
+		S.queuedFlip = null
+		if (!S.dragging && !Pinch.active) requestAnimationFrame(() => flip(nextForward))
+	}
 	// не гасим WebGL-кадр, пока страницы разворота не проявились — иначе виден скачок на мини-превью
 	const imgs = [$('#imgLeft'), $('#imgRight')]
 	const ready = imgs.every((im) => !im.getAttribute('src') || (im.complete && im.naturalWidth > 0))
 	if (ready) {
 		$('#gl').classList.remove('on')
+		runQueued()
 		return
 	}
 	const token = ++glHideToken
@@ -790,6 +923,7 @@ function finishTurn() {
 	Promise.race([allReady, timeout]).then(() => {
 		if (token !== glHideToken || S.animating || S.dragging) return
 		$('#gl').classList.remove('on')
+		runQueued()
 	})
 }
 
@@ -806,78 +940,70 @@ function pagePoint(e, rect, forward) {
 	return { x: forward ? bx - S.sizes.w : S.sizes.w - bx, y: by }
 }
 
-function rayDistanceToPageBoundary(p, dx, dy) {
+function foldFromDrag(grab, finger, opts = {}) {
 	const W = S.sizes.w
 	const H = S.sizes.h
-	let t = Infinity
-	if (dx > 1e-6) t = Math.min(t, (W - p.x) / dx)
-	else if (dx < -1e-6) t = Math.min(t, (0 - p.x) / dx)
-	if (dy > 1e-6) t = Math.min(t, (H * 0.5 - p.y) / dy)
-	else if (dy < -1e-6) t = Math.min(t, (-H * 0.5 - p.y) / dy)
-	return isFinite(t) ? Math.max(0, t) : Math.hypot(W, H)
-}
+	if (!W || !H) return null
+	const gx = clamp(grab.x, 0, W)
+	const gy = clamp(grab.y, -H * 0.49, H * 0.49)
+	const rawDx = finger.x - gx
+	const rawDy = finger.y - gy
+	const pull = Math.hypot(rawDx, rawDy)
+	if (pull < 2.5) return null
 
-function foldFromDrag(grab, finger) {
-	const W = S.sizes.w
-	const H = S.sizes.h
-	const dx = finger.x - grab.x
-	const dy = finger.y - grab.y
-	const dist = Math.hypot(dx, dy)
-	if (dist < 3) return null
-	const ux = dx / dist
-	const uy = dy / dist
-	let delta = 2 * Math.atan2(dist, FINGER_HEIGHT)
-	let sG = (FINGER_HEIGHT * FINGER_HEIGHT + dist * dist) / (2 * dist)
-	sG *= 0.2 + 0.8 * smoothstep(0, 40, dist)
-	const sMax = Math.max(3, rayDistanceToPageBoundary(grab, ux, uy))
-	if (sG > sMax) {
-		sG = sMax
-		delta = Math.acos(clamp(1 - dist / sG, -1, 1))
+	const rawInward = -rawDx
+	const completion = clamp(rawInward / (2 * W), 0, 1)
+	const inward = rawInward > 2 ? rawInward : Math.min(18, pull * 0.6)
+
+	let effDy = rawDy
+	if (!opts.pureCorner) {
+		const horizWeight = 1 - smoothstep(0.06 * H, 0.25 * H, Math.abs(rawDy))
+		const biasSign = Math.abs(gy) > H * 0.08 ? -Math.sign(gy) : -1
+		effDy += biasSign * Math.min(inward * 0.34, H * 0.16) * horizWeight * (1 - smoothstep(0.25, 0.85, completion))
 	}
+
+	const align = smoothstep(0.62, 0.98, completion)
+	let nx = inward
+	let ny = -effDy * (1 - align)
+	const nLen = Math.hypot(nx, ny) || 1
+	nx /= nLen
+	ny /= nLen
+
+	const maxTilt = 0.65 * (1 - align)
+	const ang = clamp(Math.atan2(ny, nx), -maxTilt, maxTilt)
+	const normal = { x: Math.cos(ang), y: Math.sin(ang) }
+	const dir = { x: -normal.y, y: normal.x }
+
+	const arch = Math.sin(clamp(completion, 0.01, 0.99) * Math.PI)
+	const maxR = clamp(W * (opts.isCover ? 0.26 : 0.21), 42, 135)
+	const startR = clamp(W * (opts.isCover ? 0.12 : 0.085), 24, 58)
+	const relax = smoothstep(0.68, 1, completion)
+	const archR = (startR + (maxR - startR) * arch) * (1 - 0.94 * relax) + MIN_RADIUS * relax
+	const lift = smoothstep(2.5, 48, pull)
+	const radius = clamp(MIN_RADIUS + (archR - MIN_RADIUS) * lift, MIN_RADIUS, MAX_RADIUS)
+
+	const dTarget = 0.5 * inward + 0.5 * Math.PI * radius * smoothstep(0, 90, inward)
+	const minPointX = -0.5 * Math.PI * MIN_RADIUS * smoothstep(0.95, 1, completion)
 	const point = {
-		x: clamp(grab.x + sG * ux, 0.5, W - 0.5),
-		y: clamp(grab.y + sG * uy, -H * 0.5 + 0.5, H * 0.5 - 0.5),
+		x: Math.max(minPointX, gx - dTarget * normal.x),
+		y: clamp(gy - dTarget * normal.y, -H * 0.49, H * 0.49),
 	}
-	const spineTop = { x: 0, y: -H * 0.5 }
-	const spineBottom = { x: 0, y: H * 0.5 }
-	const dot = (a, b) => a.x * b.x + a.y * b.y
-	const sub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y })
-	const flatness = smoothstep(0, 0.35, Math.abs(uy))
-	const angle0 = Math.atan2(-ux, uy)
-	const spineAngle = Math.PI * 0.5
-	let da = angle0 - spineAngle
-	while (da > Math.PI) da -= Math.PI * 2
-	while (da < -Math.PI) da += Math.PI * 2
-	const angle = angle0 + da * (1 - flatness)
-	const dir = { x: Math.cos(angle), y: Math.sin(angle) }
-	let normal = { x: -dir.y, y: dir.x }
-	if (dot(sub(grab, point), normal) < 0) {
-		normal.x = -normal.x
-		normal.y = -normal.y
-	}
-	const sGrab = Math.max(0.001, dot(sub(grab, point), normal))
-	const completion = clamp(sG / Math.max(1, sMax), 0, 1)
-	const relax = smoothstep(0.55, 1, completion)
-	const startEase = smoothstep(0, 40, dist)
-	let radius = (sGrab / Math.max(delta, 0.001)) * (1 - 0.82 * relax)
-	radius = clamp(radius, MIN_RADIUS, MAX_RADIUS)
-	radius = 90 + (radius - 90) * startEase
 	return { point, dir, normal, radius, completion }
 }
 
 function restFold() {
 	return {
-		point: { x: S.sizes.w + 2, y: 0 },
+		point: { x: S.sizes.w + 0.5, y: 0 },
 		dir: { x: 0, y: 1 },
 		normal: { x: 1, y: 0 },
-		radius: 55,
+		radius: MIN_RADIUS,
 		completion: 0,
 	}
 }
 
 function finalFold() {
 	return {
-		point: { x: 0, y: 0 },
+		point: { x: -0.5 * Math.PI * MIN_RADIUS, y: 0 },
 		dir: { x: 0, y: 1 },
 		normal: { x: 1, y: 0 },
 		radius: MIN_RADIUS,
@@ -885,17 +1011,19 @@ function finalFold() {
 	}
 }
 
-function foldFromProgress(progress) {
-	const p = clamp(progress, 0, 1)
-	const relax = smoothstep(0.55, 1, p)
-	return {
-		point: { x: (S.sizes.w + 2) * (1 - p), y: 0 },
-		dir: { x: 0, y: 1 },
-		normal: { x: 1, y: 0 },
-		radius: 55 * (1 - p) + MIN_RADIUS * p,
-		completion: p,
-		relax,
+function naturalArcFold(t, opts = {}) {
+	if (t <= 0) return restFold()
+	if (t >= 1) return finalFold()
+	const p = opts.raw ? clamp(t, 0, 1) : easeTurn(t)
+	const W = S.sizes.w
+	const H = S.sizes.h
+	const tiltSign = opts.tiltSign === -1 ? -1 : 1
+	const grab = { x: W, y: tiltSign * H * 0.44 }
+	const finger = {
+		x: W * (1 - 2 * p),
+		y: grab.y - tiltSign * H * 0.36 * Math.sin(p * Math.PI),
 	}
+	return foldFromDrag(grab, finger, { pureCorner: true, isCover: Boolean(opts.isCover) }) || restFold()
 }
 
 function smoothFold(prev, next, k) {
@@ -939,22 +1067,25 @@ function lerpFold(a, b, t) {
 }
 
 function viewportSize() {
-	return { w: (S.single ? S.sizes.w : S.sizes.w * 2) * 2, h: S.sizes.h * 2 }
+	return { w: S.single ? S.sizes.w * 3 : S.sizes.w * 4, h: S.sizes.h * 2 }
 }
 
 function constrainFold(fold, page) {
 	const halfHeight = page.h * 0.5
-	const point = { x: Math.max(0, fold.point.x), y: clamp(fold.point.y, -halfHeight, halfHeight) }
-	const lower = -Math.atan2(point.x, halfHeight + point.y)
-	const upper = Math.atan2(point.x, halfHeight - point.y)
+	const minNegX = -0.5 * Math.PI * Math.max(MIN_RADIUS, fold.radius || MIN_RADIUS)
+	const point = { x: Math.max(minNegX, fold.point.x), y: clamp(fold.point.y, -halfHeight, halfHeight) }
+	const spineX = Math.max(0, point.x)
+	const lower = -Math.atan2(spineX, halfHeight + point.y)
+	const upper = Math.atan2(spineX, halfHeight - point.y)
 	const angle = clamp(Math.atan2(fold.normal.y, fold.normal.x), lower, upper)
 	const normal = { x: Math.cos(angle), y: Math.sin(angle) }
+	if (Math.abs(angle) > 0.02 && point.x < 0) point.x = 0
 	return { ...fold, point, normal, dir: { x: -normal.y, y: normal.x } }
 }
 
-function drawFold(fold, front, back, dir) {
+function drawFold(fold, front, back, dir, shadowX) {
 	const page = { w: S.sizes.w, h: S.sizes.h }
-	queueDraw({ front, back, fold: constrainFold(fold, page), dir, page, viewport: viewportSize() })
+	queueDraw({ front, back, fold: constrainFold(fold, page), dir, page, viewport: viewportSize(), shadowX })
 }
 
 let pendingDraw = null
@@ -973,7 +1104,7 @@ function queueDraw(args) {
 	})
 }
 
-function animateFold(from, to, duration, onFrame) {
+function runAnim(duration, onProgress) {
 	return new Promise((resolve, reject) => {
 		const start = performance.now()
 		let lastFrame = start
@@ -994,8 +1125,7 @@ function animateFold(from, to, duration, onFrame) {
 			lastFrame = now
 			try {
 				const t = clamp((now - start) / Math.max(1, duration), 0, 1)
-				const fold = lerpFold(from, to, easePaper(t))
-				if (onFrame) onFrame(fold, t)
+				if (onProgress) onProgress(t)
 				if (t >= 1) finish()
 				else raf = requestAnimationFrame(frame)
 			} catch (error) { finish(error) }
@@ -1009,39 +1139,58 @@ function animateFold(from, to, duration, onFrame) {
 	})
 }
 
+function animateFold(from, to, duration, onFrame, ease = easeTurn) {
+	return runAnim(duration, (t) => {
+		const fold = lerpFold(from, to, ease(t))
+		if (onFrame) onFrame(fold, t)
+	})
+}
+
 function prepareUnderlay(forward, target) {
 	const cur = spreadPages(S.spread)
 	const nxt = spreadPages(target)
 	hideOverlays()
+	const book = $('#book')
 	if (S.single) {
 		setImage($('#imgRight'), nxt.right)
 		return
 	}
-	if (forward) {
-		setImage($('#imgRight'), nxt.right)
-		setImage($('#imgLeft'), cur.left)
-	} else {
-		setImage($('#imgLeft'), nxt.left)
-		setImage($('#imgRight'), cur.right)
-	}
+	const leftPage = forward ? cur.left : nxt.left
+	const rightPage = forward ? nxt.right : cur.right
+	setImage($('#imgLeft'), leftPage)
+	setImage($('#imgRight'), rightPage)
+	book.classList.toggle('has-left', Boolean(leftPage))
+	book.classList.toggle('cover-front', !leftPage && Boolean(rightPage))
+	book.classList.toggle('cover-back', Boolean(leftPage) && !rightPage)
 }
 
 async function flip(forward, opts = {}) {
-	if (S.animating || S.dragging || Pinch.active) return
+	if (S.dragging || Pinch.active) return
+	if (S.animating) {
+		if (!opts.fromAuto && S.turnProgress > 0.45 && S.queuedFlip === null) S.queuedFlip = forward
+		return
+	}
 	if (S.pinch) Pinch.reset()
 	const target = S.spread + (forward ? 1 : -1)
-	if (target < 0 || target > maxSpread()) return
+	if (target < 0 || target > maxSpread()) {
+		if (!opts.fromAuto) nudgeBook(forward ? 1 : -1)
+		return
+	}
 	const cur = spreadPages(S.spread)
 	const nxt = spreadPages(target)
 	const frontPage = S.single ? cur.right : forward ? cur.right : cur.left
 	const backPage = S.single ? nxt.right : forward ? nxt.left : nxt.right
 	if (!frontPage) return
+	const isCover = isCoverTurn(S.spread, target)
+	const startFold = opts.startFold || (Hover.active && Hover.currentFold && (Hover.dir > 0) === forward ? Hover.currentFold : null)
 	S.animating = true
-	Hover.cancel()
+	S.turnProgress = 0
+	if (startFold) Hover.freeze()
+	else Hover.cancel()
 	const canvas = $('#gl')
 	const hasGl = GL.gl
 	hideOverlays()
-	Sfx.play()
+	Sfx.play(isCover)
 	if (!hasGl) {
 		setSpread(target)
 		finishTurn()
@@ -1057,18 +1206,20 @@ async function flip(forward, opts = {}) {
 		loadImg(pageUrl(backPage || frontPage)).then((img) => { if (img) back = GL.texture(img) })
 		prepareUnderlay(forward, target)
 		canvas.classList.add('on')
-		const duration = opts.fromDrag ? Math.max(180, S.mf.settings.flipDuration * 0.55) : S.mf.settings.flipDuration
-		const startFold = opts.startFold || foldFromProgress(0)
-		const startRadius = opts.radius != null ? opts.radius : startFold.radius
-		const startAngle = opts.angle != null ? opts.angle : null
-		if (startRadius !== startFold.radius) startFold.radius = startRadius
-		await animateFold(startFold, finalFold(), duration, (fold) => {
-			if (startAngle != null) {
-				const a = Math.PI * 0.5 + (startAngle - Math.PI * 0.5) * (1 - fold.completion)
-				fold.dir = { x: Math.cos(a), y: Math.sin(a) }
-				fold.normal = { x: -fold.dir.y, y: fold.dir.x }
-			}
-			drawFold(fold, front, back, forward ? 1 : -1)
+		const baseDur = clamp(S.mf.settings.flipDuration || 720, 320, 1400)
+		const duration = opts.fromDrag ? Math.max(180, baseDur * 0.55) : baseDur
+		const tiltSign = startFold
+			? (startFold.normal.y >= 0 ? 1 : -1)
+			: (opts.tapY != null && opts.tapY < -S.sizes.h * 0.14 ? -1 : 1)
+		const sBounds = shadowBounds(forward, target)
+		const startComp = startFold ? clamp(startFold.completion || 0, 0, 0.85) : 0
+		await runAnim(duration, (t) => {
+			S.turnProgress = t
+			const p = startComp + (1 - startComp) * t
+			const arc = naturalArcFold(p, { tiltSign, isCover })
+			const fold = startFold ? lerpFold(startFold, arc, smoothstep(0, 0.35, t)) : arc
+			updateCoverGlide(target, fold.completion)
+			drawFold(fold, front, back, forward ? 1 : -1, sBounds)
 		})
 		setSpread(target)
 	} catch (_) {
@@ -1080,6 +1231,7 @@ async function flip(forward, opts = {}) {
 
 function goToPage(n) {
 	if (S.animating || S.dragging) return
+	S.queuedFlip = null
 	if (S.pinch) Pinch.reset()
 	Hover.cancel()
 	const page = clamp(Math.floor(Number(n) || 1), 1, S.mf.pageCount)
@@ -1100,13 +1252,17 @@ const Hover = {
 	front: null,
 	back: null,
 	currentFold: null,
+	targetSpread: 0,
 	lastCheck: 0,
-	cancel() {
+	freeze() {
 		if (this.animId) {
 			cancelAnimationFrame(this.animId)
 			this.animId = null
 		}
 		this.active = false
+	},
+	cancel() {
+		this.freeze()
 		this.progress = 0
 		this.target = 0
 		this.corner = null
@@ -1121,21 +1277,21 @@ const Hover = {
 		}
 	},
 	cornerAt(mx, my, W, H) {
-		const size = Math.min(120, Math.min(W * 0.22, H * 0.25))
+		const size = Math.min(130, Math.min(W * 0.24, H * 0.26))
 		let best = null
 		let bestDist = Infinity
-		const add = (corner, dir, x, y, d) => {
+		const add = (corner, dir, grabY, d) => {
 			if (d >= size || d >= bestDist) return
-			best = { corner, dir, x, y }
+			best = { corner, dir, grabY, dist: d, size }
 			bestDist = d
 		}
 		if (S.spread < maxSpread()) {
-			add('br', 1, W, H * 0.5, Math.hypot(W - mx, H - my))
-			add('tr', 1, W, -H * 0.5, Math.hypot(W - mx, my))
+			add('br', 1, S.sizes.h * 0.5, Math.hypot(W - mx, H - my))
+			add('tr', 1, -S.sizes.h * 0.5, Math.hypot(W - mx, my))
 		}
 		if (S.spread > 0) {
-			add('bl', -1, W, H * 0.5, Math.hypot(mx, H - my))
-			add('tl', -1, W, -H * 0.5, Math.hypot(mx, my))
+			add('bl', -1, S.sizes.h * 0.5, Math.hypot(mx, H - my))
+			add('tl', -1, -S.sizes.h * 0.5, Math.hypot(mx, my))
 		}
 		return best
 	},
@@ -1150,13 +1306,11 @@ const Hover = {
 		const hit = this.cornerAt(mx, my, r.width, r.height)
 		if (hit) {
 			book.style.cursor = 'grab'
-			const size = Math.min(120, Math.min(r.width * 0.22, r.height * 0.25))
-			const dist = Math.hypot(hit.x - mx, hit.y - my)
-			this.target = clamp((1 - dist / size) * 22, 4, 22)
+			this.target = clamp((1 - hit.dist / hit.size) * 34, 6, 34)
 			if (!this.active || this.corner !== hit.corner) {
 				this.corner = hit.corner
 				this.dir = hit.dir
-				this.grab = { x: S.sizes.w, y: hit.y }
+				this.grab = { x: S.sizes.w, y: hit.grabY }
 				this.offset = { x: -1, y: hit.corner[0] === 'b' ? -1 : 1 }
 				this.active = true
 				await this.prepare(hit.dir)
@@ -1179,8 +1333,11 @@ const Hover = {
 		if (!frontPage) return
 		const [fImg, bImg] = await Promise.all([pageTex(frontPage), pageTex(backPage || frontPage)])
 		if (!fImg || !bImg || !this.active || this.dir !== dir || S.animating || S.dragging) return
+		this.targetSpread = target
 		this.front = GL.texture(fImg)
 		this.back = GL.texture(bImg)
+		loadImg(pageUrl(frontPage)).then((img) => { if (img && this.active && this.dir === dir) this.front = GL.texture(img) })
+		loadImg(pageUrl(backPage || frontPage)).then((img) => { if (img && this.active && this.dir === dir) this.back = GL.texture(img) })
 		prepareUnderlay(dir > 0, target)
 		$('#gl').classList.add('on')
 	},
@@ -1192,10 +1349,14 @@ const Hover = {
 			const dist = this.progress
 			let fold = null
 			if (dist > 0.5 && this.grab && this.offset) {
-				fold = smoothFold(this.currentFold, foldFromDrag(this.grab, { x: this.grab.x + this.offset.x * dist, y: this.grab.y + this.offset.y * dist }), 0.3)
+				fold = smoothFold(
+					this.currentFold,
+					foldFromDrag(this.grab, { x: this.grab.x + this.offset.x * dist, y: this.grab.y + this.offset.y * dist * 0.85 }, { pureCorner: true, isCover: isCoverTurn(S.spread, this.targetSpread) }),
+					0.32
+				)
 			}
 			this.currentFold = fold
-			if (fold && this.front && this.back && !S.dragging && !S.animating) drawFold(fold, this.front, this.back, this.dir)
+			if (fold && this.front && this.back && !S.dragging && !S.animating) drawFold(fold, this.front, this.back, this.dir, shadowBounds(this.dir > 0, this.targetSpread))
 			if (this.progress > 0 || this.target > 0) {
 				this.animId = requestAnimationFrame(step)
 			} else {
@@ -1429,12 +1590,30 @@ function initDrag() {
 	let lastEvent = null
 	S.dragging = false
 
-	const beginDrag = async () => {
-		if (!startInfo || drag || startInfo.preparing) return
-		const info = startInfo
+	const dragFinger = (e, info) => {
+		const gain = S.single ? 1.82 : 1.06
+		const turnDx = (e.clientX - info.clientX) * (info.forward ? 1 : -1)
+		const turnDy = e.clientY - info.clientY
+		return {
+			x: info.grab.x + turnDx * gain,
+			y: info.grab.y + turnDy,
+		}
+	}
+
+	const trackVelocity = (e, state) => {
+		const now = performance.now()
+		const dt = Math.max(1, now - state.lastT)
+		const stepV = ((state.lastX - e.clientX) * (state.forward ? 1 : -1)) / dt
+		state.vx = state.vx * 0.6 + stepV * 0.4
+		state.lastX = e.clientX
+		state.lastT = now
+	}
+
+	const beginDrag = async (info) => {
+		if (!info || drag || info.preparing) return
 		info.preparing = true
 		const forward = info.forward
-		const backward = startInfo.backward
+		const backward = info.backward
 		if (!forward && !backward) return
 		const target = S.spread + (forward ? 1 : -1)
 		if (target < 0 || target > maxSpread()) return
@@ -1448,18 +1627,27 @@ function initDrag() {
 		const front = GL.texture(fImg)
 		const back = GL.texture(bImg)
 		if (!front || !back) return
+		const isCover = isCoverTurn(S.spread, target)
+		const sBounds = shadowBounds(forward, target)
 		prepareUnderlay(forward, target)
 		canvas.classList.add('on')
 		drag = {
 			forward,
 			target,
+			isCover,
+			sBounds,
 			pointerId: info.pointerId,
-			grab: startInfo.grab,
-			rect: startInfo.rect,
-			fold: null,
+			clientX: info.clientX,
+			clientY: info.clientY,
+			lastX: info.lastX,
+			lastT: info.lastT,
+			vx: info.vx,
+			grab: info.grab,
+			rect: info.rect,
+			fold: info.hoverFold || null,
 			front,
 			back,
-			last: { x: startInfo.grab.x, y: startInfo.grab.y },
+			last: { x: info.grab.x, y: info.grab.y },
 			moved: true,
 		}
 		// Подтягиваем HD-текстуру прямо во время перетаскивания, если старт был с превью
@@ -1468,7 +1656,7 @@ function initDrag() {
 			const tex = GL.texture(img)
 			if (tex) {
 				drag.front = tex
-				if (drag.fold) drawFold(drag.fold, drag.front, drag.back, drag.forward ? 1 : -1)
+				if (drag.fold) drawFold(drag.fold, drag.front, drag.back, drag.forward ? 1 : -1, drag.sBounds)
 			}
 		})
 		loadImg(pageUrl(backPage || frontPage)).then((img) => {
@@ -1476,13 +1664,17 @@ function initDrag() {
 			const tex = GL.texture(img)
 			if (tex) {
 				drag.back = tex
-				if (drag.fold) drawFold(drag.fold, drag.front, drag.back, drag.forward ? 1 : -1)
+				if (drag.fold) drawFold(drag.fold, drag.front, drag.back, drag.forward ? 1 : -1, drag.sBounds)
 			}
 		})
 		if (lastEvent) {
-			drag.last = pagePoint(lastEvent, drag.rect, drag.forward)
-			drag.fold = foldFromDrag(drag.grab, drag.last)
-			if (drag.fold) drawFold(drag.fold, drag.front, drag.back, drag.forward ? 1 : -1)
+			drag.last = dragFinger(lastEvent, drag)
+			const nextFold = foldFromDrag(drag.grab, drag.last, { isCover: drag.isCover })
+			drag.fold = drag.fold ? smoothFold(drag.fold, nextFold, 0.55) : nextFold
+			if (drag.fold) {
+				updateCoverGlide(drag.target, drag.fold.completion)
+				drawFold(drag.fold, drag.front, drag.back, drag.forward ? 1 : -1, drag.sBounds)
+			}
 		}
 	}
 
@@ -1492,6 +1684,7 @@ function initDrag() {
 		if (startInfo && e.pointerId !== startInfo.pointerId) return
 		if (!drag) {
 			if (!startInfo) return
+			trackVelocity(e, startInfo)
 			const dx = e.clientX - startInfo.clientX
 			const dy = e.clientY - startInfo.clientY
 			if (Math.hypot(dx, dy) > 7) {
@@ -1501,35 +1694,67 @@ function initDrag() {
 					if (Math.abs(dx) < Math.abs(dy) * 1.25) return
 					startInfo.forward = e.clientX < startInfo.clientX
 					startInfo.backward = !startInfo.forward
-					// захват всегда у свободного края страницы — сгиб получается ровным
-					startInfo.grab = { x: S.sizes.w, y: pagePoint(e, startInfo.rect, startInfo.forward).y }
+					startInfo.touchStart = pagePoint({ clientX: startInfo.clientX, clientY: startInfo.clientY }, startInfo.rect, startInfo.forward)
+					startInfo.grab = { x: S.sizes.w, y: clamp(startInfo.touchStart.y, -S.sizes.h * 0.47, S.sizes.h * 0.47) }
 				}
 				const target = S.spread + (startInfo.forward ? 1 : -1)
-				if (target < 0 || target > maxSpread()) return
+				if (target < 0 || target > maxSpread()) {
+					startInfo.outOfBounds = true
+					if (!startInfo.nudged) {
+						startInfo.nudged = true
+						Hover.cancel()
+						nudgeBook(startInfo.forward ? 1 : -1)
+					}
+					return
+				}
 				startInfo.gestureAccepted = true
 				S.dragging = true
-				Hover.cancel()
-				beginDrag().catch(() => {})
+				if (startInfo.hoverFold && (startInfo.hoverDir > 0) === startInfo.forward) Hover.freeze()
+				else Hover.cancel()
+				beginDrag(startInfo).catch(() => {})
 			}
 			return
 		}
-		const finger = pagePoint(e, drag.rect, drag.forward)
+		trackVelocity(e, drag)
+		const finger = dragFinger(e, drag)
 		drag.last = finger
-		const fold = smoothFold(drag.fold, foldFromDrag(drag.grab, finger), 0.45)
+		const fold = smoothFold(drag.fold, foldFromDrag(drag.grab, finger, { isCover: drag.isCover }), 0.45)
 		if (fold) drag.fold = fold
-		if (drag.fold) drawFold(drag.fold, drag.front, drag.back, drag.forward ? 1 : -1)
+		if (drag.fold) {
+			updateCoverGlide(drag.target, drag.fold.completion)
+			drawFold(drag.fold, drag.front, drag.back, drag.forward ? 1 : -1, drag.sBounds)
+		}
 	}
 
-	const settle = async (d, complete) => {
+	const settle = async (d, complete, vx = 0) => {
 		if (!d) return
 		S.animating = true
+		S.turnProgress = 0
 		const from = d.fold || restFold()
-		const to = complete ? finalFold() : restFold()
-		const duration = complete ? Math.max(180, S.mf.settings.flipDuration * 0.55) : 220
-		if (complete) Sfx.play()
+		const comp = clamp(from.completion || 0, 0, 1)
+		const remain = complete ? (1 - comp) : comp
+		const speedFactor = clamp(1 - Math.max(0, vx) * 0.35, 0.55, 1)
+		const baseDur = complete ? Math.max(200, (S.mf.settings.flipDuration || 720) * 0.65) : 240
+		const duration = clamp(baseDur * Math.max(0.38, remain) * speedFactor, 150, 480)
+		if (complete) Sfx.play(d.isCover)
 		try {
-			await animateFold(from, to, duration, (fold) => drawFold(fold, d.front, d.back, d.forward ? 1 : -1))
-			if (complete) setSpread(d.target)
+			if (complete) {
+				const tiltSign = from.normal.y >= 0 ? 1 : -1
+				await runAnim(duration, (t) => {
+					const e = easeOutCubic(t)
+					S.turnProgress = comp + (1 - comp) * e
+					const arc = naturalArcFold(S.turnProgress, { tiltSign, isCover: d.isCover, raw: true })
+					const fold = lerpFold(from, arc, smoothstep(0, 0.35, t))
+					updateCoverGlide(d.target, fold.completion)
+					drawFold(fold, d.front, d.back, d.forward ? 1 : -1, d.sBounds)
+				})
+				setSpread(d.target)
+			} else {
+				await animateFold(from, restFold(), duration, (fold) => {
+					updateCoverGlide(d.target, fold.completion)
+					drawFold(fold, d.front, d.back, d.forward ? 1 : -1, d.sBounds)
+				}, easeOutCubic)
+			}
 		} finally {
 			finishTurn()
 		}
@@ -1548,6 +1773,11 @@ function initDrag() {
 		S.dragging = false
 		if (S.pinch || Pinch.active) {
 			if (d && !Pinch.active) settle(d, false)
+			else if (si && si.hoverFold) Hover.cancel()
+			return
+		}
+		if (si && si.outOfBounds) {
+			Hover.cancel()
 			return
 		}
 		if (!d || !d.moved) {
@@ -1555,17 +1785,22 @@ function initDrag() {
 				const distance = Math.abs((e.clientX ?? si.clientX) - si.clientX)
 				const quickSwipe = distance > 35 && performance.now() - si.startedAt < 350
 				const fullSwipe = distance > si.rect.width * 0.22
+				const hoverFold = si.hoverFold && (si.hoverDir > 0) === si.forward ? si.hoverFold : null
 				if (!si.moved || (si.gestureAccepted && (quickSwipe || fullSwipe))) {
-					if (si.forward) flip(true)
-					else if (si.backward) flip(false)
+					flip(si.forward, { tapY: si.touchStart.y, startFold: hoverFold })
+					return
 				}
 			}
+			if (si && si.hoverFold) Hover.cancel()
 			return
 		}
 		if (S.animating) return
-		const amount = clamp((d.grab.x - d.last.x) / Math.max(1, d.grab.x), 0, 1)
-		const complete = e.type !== 'pointercancel' && (amount > 0.22 || (d.fold && d.fold.completion > 0.45))
-		await settle(d, complete)
+		const age = performance.now() - d.lastT
+		const vx = age > 120 ? 0 : d.vx
+		const amount = clamp((d.grab.x - d.last.x) / Math.max(1, 2 * S.sizes.w), 0, 1)
+		const comp = d.fold ? d.fold.completion : 0
+		const complete = e.type !== 'pointercancel' && (vx > -0.25) && (amount > 0.20 || comp > 0.36 || vx > 0.35)
+		await settle(d, complete, vx)
 	}
 
 	$('#stage').addEventListener('flipvio-cancel-drag', () => {
@@ -1581,6 +1816,8 @@ function initDrag() {
 			pendingDraw = null
 			canvas.classList.remove('on')
 			renderSpread()
+		} else {
+			Hover.cancel()
 		}
 	})
 	book.addEventListener('pointermove', (e) => {
@@ -1596,19 +1833,34 @@ function initDrag() {
 		if (S.animating || S.pinch || Pinch.active || startInfo || e.button !== 0 || e.isPrimary === false || e.target.closest('button, input, a, video, audio, .interactive')) return
 		const r = book.getBoundingClientRect()
 		const x = (e.clientX - r.left) / r.width
+		if (!S.single) {
+			const cur = spreadPages(S.spread)
+			if ((!cur.left && x < 0.5) || (!cur.right && x >= 0.5)) return
+		}
 		const forward = S.single ? x >= 0.35 : x >= 0.5
 		const backward = S.single ? x < 0.35 : x < 0.5
+		const touchStart = pagePoint(e, r, forward)
+		const hoverFold = Hover.active && Hover.currentFold ? Hover.currentFold : null
+		const hoverDir = Hover.dir
+		if (hoverFold && (hoverDir > 0) === forward) Hover.freeze()
+		else Hover.cancel()
+		const now = performance.now()
 		startInfo = {
 			clientX: e.clientX,
 			clientY: e.clientY,
-			startedAt: performance.now(),
+			lastX: e.clientX,
+			lastT: now,
+			vx: 0,
+			startedAt: now,
 			pointerId: e.pointerId,
-			grab: pagePoint(e, r, forward),
+			touchStart,
+			grab: { x: S.sizes.w, y: clamp(touchStart.y, -S.sizes.h * 0.47, S.sizes.h * 0.47) },
 			forward,
 			backward,
+			hoverFold,
+			hoverDir,
 			rect: r,
 		}
-		Hover.cancel()
 		window.addEventListener('pointermove', onMove)
 		window.addEventListener('pointerup', onUp)
 		window.addEventListener('pointercancel', onUp)
@@ -1721,10 +1973,11 @@ function toggleAuto() {
 	}
 	const sec = S.mf.settings.autoFlipSeconds || 4
 	S.auto = setInterval(() => {
+		if (S.pinch || Pinch.active || S.dragging || S.animating) return
 		if (S.spread >= maxSpread()) {
 			goToPage(1)
 		} else {
-			flip(true)
+			flip(true, { fromAuto: true })
 		}
 	}, sec * 1000)
 	btn.classList.add('active')
@@ -1763,7 +2016,7 @@ function initUi() {
 			S.sound = !S.sound
 			btn.classList.toggle('active', S.sound)
 			btn.setAttribute('aria-pressed', String(S.sound))
-			if (!S.sound) Sfx.audio?.pause()
+			if (!S.sound) Sfx.stopAll()
 		}
 		if (act === 'print' && S.mf.settings.allowPrint !== false) window.print()
 		if (act === 'download' && S.mf.settings.allowDownload !== false && safeUrl(S.mf.pdfUrl)) location.href = safeUrl(S.mf.pdfUrl)
@@ -1775,12 +2028,15 @@ function initUi() {
 			else (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el)?.catch?.(() => {})
 		}
 	})
-	$('#pageInput').addEventListener('keydown', (e) => {
+	const pageInput = $('#pageInput')
+	pageInput.addEventListener('keydown', (e) => {
 		if (e.key === 'Enter') {
 			goToPage(e.target.value)
 			e.target.blur()
 		}
 	})
+	pageInput.addEventListener('change', (e) => goToPage(e.target.value))
+	pageInput.addEventListener('blur', () => { pageInput.value = S.currentPage })
 	window.addEventListener('keydown', (e) => {
 		if (e.target.closest('input, textarea, video, audio, a, button, [contenteditable="true"]') && e.key !== 'Escape') return
 		if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') {
@@ -1877,4 +2133,4 @@ async function init() {
 
 document.addEventListener('DOMContentLoaded', init)
 
-if (!window.__flipvio) window.__flipvio = { S, Sfx, Hover, GL, Pinch, foldFromDrag, restFold, finalFold }
+if (!window.__flipvio) window.__flipvio = { S, Sfx, Hover, GL, Pinch, foldFromDrag, restFold, finalFold, naturalArcFold, shadowBounds }

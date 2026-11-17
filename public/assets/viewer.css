@@ -117,8 +117,8 @@ html, body {
 	position: absolute;
 	top: 3px;
 	bottom: 3px;
-	right: -7px;
-	width: 7px;
+	right: calc(var(--stack-right, 7px) * -1);
+	width: var(--stack-right, 7px);
 	background: repeating-linear-gradient(
 		90deg,
 		#ddd 0px,
@@ -135,8 +135,8 @@ html, body {
 	position: absolute;
 	top: 3px;
 	bottom: 3px;
-	left: -7px;
-	width: 7px;
+	left: calc(var(--stack-left, 7px) * -1);
+	width: var(--stack-left, 7px);
 	background: repeating-linear-gradient(
 		90deg,
 		#bbb 0px,
@@ -151,6 +151,10 @@ html, body {
 }
 #book.has-left::before {
 	display: block;
+}
+#book.nudge {
+	transition: transform 0.16s cubic-bezier(0.22, 1, 0.36, 1);
+	transform: translate3d(var(--nudge-x, 0px), 0, 0);
 }
 /* Пинч-зум и панорама книги */
 #book.pinch {
@@ -227,6 +231,10 @@ html, body {
 	opacity: 0;
 	z-index: 8;
 	overflow: visible;
+}
+#book.single #gl {
+	left: -100%;
+	width: 300%;
 }
 #gl.on {
 	opacity: 1;
