@@ -10,6 +10,7 @@ html, body {
 	margin: 0;
 	padding: 0;
 	height: 100%;
+	height: 100dvh;
 	overflow: hidden;
 	background: #111;
 	font: 14px/1.4 -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -45,7 +46,9 @@ html, body {
 #app {
 	position: fixed;
 	inset: 0;
-	background: radial-gradient(120% 120% at 50% 10%, #2e3440, #14161c);
+	background: radial-gradient(120% 120% at 50% 10%, var(--bg1), var(--bg2));
+	background-size: cover;
+	background-position: center;
 	overflow: hidden;
 }
 #stage {
@@ -53,15 +56,16 @@ html, body {
 	top: 0;
 	left: 0;
 	right: 0;
-	bottom: 58px;
+	bottom: var(--toolbar-height, 58px);
 	width: 100%;
-	height: calc(100% - 58px);
+	height: auto;
 	display: flex;
 	align-items: center;
 	justify-content: center;
 	z-index: 10;
 	overflow: visible !important;
-	padding: 16px;
+	padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 16px max(16px, env(safe-area-inset-left));
+	touch-action: none;
 }
 
 /* Навигационные стрелки */
@@ -101,7 +105,8 @@ html, body {
 	cursor: grab;
 	touch-action: none;
 	overflow: visible !important;
-	transform: none !important;
+	transform: none;
+	transform-origin: 50% 50%;
 }
 #book:active {
 	cursor: grabbing;
@@ -147,10 +152,16 @@ html, body {
 #book.has-left::before {
 	display: block;
 }
-/* Пинч-зум книги пальцами (мобильные) */
+/* Пинч-зум и панорама книги */
 #book.pinch {
-	transform: translate(var(--pinch-x, 0px), var(--pinch-y, 0px)) scale(var(--pinch-s, 1)) !important;
+	transform: translate3d(var(--pinch-x, 0px), var(--pinch-y, 0px), 0) scale(var(--pinch-s, 1)) !important;
+	transform-origin: 50% 50%;
 	z-index: 40;
+	cursor: grab;
+	will-change: transform;
+}
+#book.pinch:active {
+	cursor: grabbing;
 }
 #book.single::before {
 	display: none !important;
@@ -227,11 +238,14 @@ html, body {
 	left: 0;
 	right: 0;
 	bottom: 0;
-	height: 58px;
+	height: auto;
+	min-height: 58px;
 	display: flex;
+	flex-wrap: wrap;
 	gap: 4px;
 	align-items: center;
 	justify-content: center;
+	padding: 6px max(8px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
 	background: var(--bar);
 	backdrop-filter: blur(12px);
 	border-top: 1px solid rgba(255,255,255,.08);
@@ -240,6 +254,7 @@ html, body {
 #toolbar button {
 	width: 38px;
 	height: 38px;
+	flex: 0 0 38px;
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -264,7 +279,7 @@ html, body {
 	stroke-linejoin: round;
 }
 #toolbar .sep { width: 1px; height: 22px; background: rgba(255,255,255,.16); margin: 0 6px; }
-#pageBox { display: flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+#pageBox { display: flex; align-items: center; gap: 6px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
 #pageInput {
 	width: 48px;
 	text-align: center;
@@ -279,7 +294,7 @@ html, body {
 #panel {
 	position: absolute;
 	top: 0;
-	bottom: 58px;
+	bottom: var(--toolbar-height, 58px);
 	left: 0;
 	width: min(300px, 85vw);
 	background: rgba(16,16,20,.96);
@@ -289,8 +304,9 @@ html, body {
 	overflow: auto;
 	z-index: 35;
 	border-right: 1px solid rgba(255,255,255,0.08);
+	visibility: hidden;
 }
-#panel.open { transform: none; }
+#panel.open { transform: none; visibility: visible; }
 #panel > header {
 	display: flex;
 	justify-content: space-between;
@@ -318,7 +334,16 @@ html, body {
 #panel .tab:hover { background: rgba(255,255,255,.08); color: #fff; }
 #panel .tab.active { background: var(--accent); color: #fff; }
 #thumbList { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 14px 12px; }
-#thumbList img { width: 100%; border-radius: 4px; cursor: pointer; background: #fff; border: 2px solid transparent; transition: transform .15s, border-color .15s; }
+#thumbList img {
+	width: 100%;
+	aspect-ratio: var(--page-ratio, 0.75);
+	object-fit: contain;
+	border-radius: 4px;
+	cursor: pointer;
+	background: #fff;
+	border: 2px solid transparent;
+	transition: transform .15s, border-color .15s;
+}
 #thumbList img:hover { transform: scale(1.04); }
 #thumbList img.cur { border-color: var(--accent); box-shadow: 0 0 10px rgba(30, 64, 175, 0.5); }
 #tocList button {
@@ -336,15 +361,15 @@ html, body {
 }
 #tocList button:hover { background: rgba(255,255,255,.06); }
 
-/* Зум */
+/* Зум (резервный блок оставлен скрытым, зум работает прямо на книге) */
 #zoomView { display: none; position: absolute; inset: 0; background: rgba(0,0,0,.94); overflow: auto; z-index: 40; }
 #zoomView.open { display: block !important; }
 #zoomInner { min-height: 100%; display: flex; align-items: flex-start; justify-content: center; padding: 20px; }
 #zoomImg { max-width: none; width: 140%; border-radius: 4px; box-shadow: 0 10px 40px rgba(0,0,0,0.8); }
 #zoomClose {
 	position: fixed;
-	top: 16px;
-	right: 18px;
+	top: max(16px, env(safe-area-inset-top));
+	right: max(18px, env(safe-area-inset-right));
 	width: 42px;
 	height: 42px;
 	border-radius: 50%;
@@ -359,7 +384,7 @@ html, body {
 /* Поделиться */
 #shareView { display: none; position: absolute; inset: 0; align-items: center; justify-content: center; background: rgba(0,0,0,.65); z-index: 50; }
 #shareView.open { display: flex !important; }
-#shareView .card { width: min(520px, 92vw); background: #1c1e24; border: 1px solid rgba(255,255,255,.12); border-radius: 14px; padding: 22px; box-shadow: 0 20px 50px rgba(0,0,0,0.6); }
+#shareView .card { width: min(520px, 92vw); max-height: 90dvh; overflow: auto; background: #1c1e24; border: 1px solid rgba(255,255,255,.12); border-radius: 14px; padding: 22px; box-shadow: 0 20px 50px rgba(0,0,0,0.6); }
 #shareView h3 { margin: 0 0 16px; }
 #shareView label { display: block; font-size: 12px; color: #9a9a9a; margin-bottom: 12px; }
 #shareView input, #shareView textarea {
@@ -373,15 +398,10 @@ html, body {
 	font-family: ui-monospace, monospace;
 	font-size: 12px;
 }
-#shareView .row { display: flex; gap: 10px; justify-content: flex-end; margin-top: 14px; }
+#shareView .row { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; margin-top: 14px; }
 #shareView .row button { padding: 9px 16px; border-radius: 8px; border: 0; background: rgba(255,255,255,.12); color: #fff; cursor: pointer; }
 #shareView .row button:first-child { background: var(--accent); }
 
-#app { background: radial-gradient(120% 120% at 50% 10%, var(--bg1), var(--bg2)); background-size: cover; background-position: center; }
-#stage { bottom: var(--toolbar-height, 58px); height: auto; padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 16px max(16px, env(safe-area-inset-left)); }
-#toolbar { height: auto; min-height: 58px; flex-wrap: wrap; padding: 6px max(8px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); }
-#toolbar button { flex: 0 0 38px; }
-#pageBox { flex-shrink: 0; }
 #brand { position: absolute; top: max(10px, env(safe-area-inset-top)); left: max(10px, env(safe-area-inset-left)); z-index: 26; }
 #brand img { display: block; max-width: 35vw; max-height: 70px; object-fit: contain; }
 #overlays { position: absolute; inset: 0; z-index: 6; pointer-events: none; }
@@ -392,14 +412,8 @@ html, body {
 .page-element { position: absolute; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; text-decoration: none; line-height: 1.2; }
 .page-element a, a.page-element, .page-element.interactive { pointer-events: auto; cursor: pointer; touch-action: manipulation; }
 #book .page-element img, #book .page-element video, #book .page-element audio { position: static; display: block; width: 100%; height: 100%; background: transparent; border-radius: 0; }
-#panel { bottom: var(--toolbar-height, 58px); visibility: hidden; }
-#panel.open { visibility: visible; }
-#thumbList img { aspect-ratio: var(--page-ratio, 0.75); object-fit: contain; }
-#shareView .card { max-height: 90dvh; overflow: auto; }
-#shareView .row { flex-wrap: wrap; }
 #qrBox { text-align: center; margin-top: 16px; }
 #qrImg { display: block; margin: auto; width: min(220px, 100%); aspect-ratio: 1; object-fit: contain; background: #fff; }
-#zoomClose { top: max(16px, env(safe-area-inset-top)); right: max(18px, env(safe-area-inset-right)); }
 button:disabled { opacity: .4; cursor: default; }
 button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (max-width: 780px), (pointer: coarse) {
@@ -414,7 +428,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
 	#panel { background: rgba(14, 14, 18, 0.98); }
 }
 @media (hover: none), (any-pointer: coarse) {
-	#book, #book:active { cursor: default; }
+	#book, #book:active, #book.pinch, #book.pinch:active { cursor: default; }
 	#toolbar button:hover { background: transparent; }
 	#toolbar button.active:hover { background: var(--accent); }
 	#thumbList img:hover { transform: none; }

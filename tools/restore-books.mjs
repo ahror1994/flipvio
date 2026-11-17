@@ -16,13 +16,7 @@ const jobs = []
 
 // 1. PDF-книги из локальной базы
 const db = JSON.parse(fs.readFileSync(new URL('../storage/db.json', import.meta.url), 'utf8'))
-const pdfBooks = [
-  { localSlug: 'каталог-2026-тест-d259ac', slug: 'каталог-2026-тест', toc: [
-    { title: 'салаты', page: 24 },
-    { title: 'салаты', page: 21 },
-  ] },
-  { localSlug: 'коммерческое-предложение-и-договор-на-ра-a79d9a', slug: 'коммерческое-предложение' },
-]
+const pdfBooks = []
 for (const item of pdfBooks) {
   const local = db.books.find((b) => b.slug === item.localSlug)
   const pdf = local && path.resolve('storage', item.localSlug, 'source.pdf')

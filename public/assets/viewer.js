@@ -7,6 +7,8 @@ const STATIC = document.body.dataset.static !== undefined
 const ROOT = document.body.dataset.root || ''
 const MANIFEST_URL = document.body.dataset.manifest
 
+const IS_MOBILE = () => Math.min(innerWidth, innerHeight) < 820 || matchMedia('(pointer: coarse)').matches
+
 const S = {
 	mf: null,
 	spread: 0,
@@ -21,7 +23,12 @@ const S = {
 	sizes: { w: 0, h: 0 },
 	tex: new Map(),
 	imgCache: new Map(),
+	thumbCache: new Map(),
+	largeCache: new Map(),
+	imgCacheLimit: 24,
 	pendingImg: new Map(),
+	curThumb: null,
+	preloadToken: 0,
 }
 
 const Sfx = {
@@ -192,14 +199,29 @@ const GL = {
 	prog: null,
 	shadowProg: null,
 	pageBuf: null,
+	pageIdxBuf: null,
 	shadowBuf: null,
-	count: 0,
+	pageVao: null,
+	shadowVao: null,
+	indexCount: 0,
 	u: {},
 	shadowU: {},
 	pageLoc: -1,
 	shadowLoc: -1,
+	boundCanvas: null,
 	init(canvas) {
-		if (this.gl) return true
+		if (this.gl && !this.gl.isContextLost()) return true
+		if (this.boundCanvas !== canvas) {
+			this.boundCanvas = canvas
+			canvas.addEventListener('webglcontextlost', (e) => {
+				e.preventDefault()
+				S.tex.clear()
+				this.gl = null
+			})
+			canvas.addEventListener('webglcontextrestored', () => {
+				try { this.init(canvas) } catch (_) { this.gl = null }
+			})
+		}
 		const gl = canvas.getContext('webgl2', { alpha: true, antialias: true, premultipliedAlpha: false, powerPreference: 'high-performance' })
 		if (!gl) return false
 		this.gl = gl
@@ -222,37 +244,69 @@ const GL = {
 		gl.linkProgram(sProg)
 		if (!gl.getProgramParameter(sProg, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(sProg))
 		this.shadowProg = sProg
-		const mobileGrid = Math.min(innerWidth, innerHeight) < 820 || matchMedia('(pointer: coarse)').matches
-		const NX = mobileGrid ? 150 : 240
-		const NY = mobileGrid ? 75 : 120
-		const verts = []
-		for (let i = 0; i < NX; i++) {
-			const u0 = i / NX
-			const u1 = (i + 1) / NX
-			for (let j = 0; j < NY; j++) {
-				const v0 = j / NY
-				const v1 = (j + 1) / NY
-				verts.push(u0, v0, u1, v0, u1, v1, u0, v0, u1, v1, u0, v1)
-			}
-		}
-		this.count = verts.length / 2
-		this.pageBuf = gl.createBuffer()
-		gl.bindBuffer(gl.ARRAY_BUFFER, this.pageBuf)
-		gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.STATIC_DRAW)
-		this.shadowBuf = gl.createBuffer()
-		gl.bindBuffer(gl.ARRAY_BUFFER, this.shadowBuf)
-		gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1]), gl.STATIC_DRAW)
 		for (const name of ['uPage', 'uViewport', 'uPan', 'uDir', 'uFoldPoint', 'uFoldDir', 'uFoldNormal', 'uRadius', 'uFront', 'uBack']) this.u[name] = gl.getUniformLocation(prog, name)
 		for (const name of ['uPage', 'uViewport', 'uPan', 'uDir', 'uFoldPoint', 'uFoldNormal', 'uRadius']) this.shadowU[name] = gl.getUniformLocation(sProg, name)
 		this.pageLoc = gl.getAttribLocation(prog, 'aGrid')
 		this.shadowLoc = gl.getAttribLocation(sProg, 'aQuad')
+
+		const mobileGrid = IS_MOBILE()
+		const NX = mobileGrid ? 150 : 240
+		const NY = mobileGrid ? 75 : 120
+		const rows = NY + 1
+		const verts = new Float32Array((NX + 1) * rows * 2)
+		let vi = 0
+		for (let i = 0; i <= NX; i++) {
+			const u = i / NX
+			for (let j = 0; j <= NY; j++) {
+				verts[vi++] = u
+				verts[vi++] = j / NY
+			}
+		}
+		const indices = new Uint16Array(NX * NY * 6)
+		let ii = 0
+		for (let i = 0; i < NX; i++) {
+			for (let j = 0; j < NY; j++) {
+				const a = i * rows + j
+				const b = (i + 1) * rows + j
+				const c = (i + 1) * rows + (j + 1)
+				const d = i * rows + (j + 1)
+				indices[ii++] = a
+				indices[ii++] = b
+				indices[ii++] = c
+				indices[ii++] = a
+				indices[ii++] = c
+				indices[ii++] = d
+			}
+		}
+		this.indexCount = indices.length
+
+		this.pageVao = gl.createVertexArray()
+		gl.bindVertexArray(this.pageVao)
+		this.pageBuf = gl.createBuffer()
+		gl.bindBuffer(gl.ARRAY_BUFFER, this.pageBuf)
+		gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STATIC_DRAW)
+		this.pageIdxBuf = gl.createBuffer()
+		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.pageIdxBuf)
+		gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW)
+		gl.enableVertexAttribArray(this.pageLoc)
+		gl.vertexAttribPointer(this.pageLoc, 2, gl.FLOAT, false, 0, 0)
+
+		this.shadowVao = gl.createVertexArray()
+		gl.bindVertexArray(this.shadowVao)
+		this.shadowBuf = gl.createBuffer()
+		gl.bindBuffer(gl.ARRAY_BUFFER, this.shadowBuf)
+		gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1]), gl.STATIC_DRAW)
+		gl.enableVertexAttribArray(this.shadowLoc)
+		gl.vertexAttribPointer(this.shadowLoc, 2, gl.FLOAT, false, 0, 0)
+		gl.bindVertexArray(null)
+
 		gl.useProgram(prog)
 		gl.uniform1i(this.u.uFront, 0)
 		gl.uniform1i(this.u.uBack, 1)
 		return true
 	},
 	texture(img) {
-		if (!img || !this.gl || !img.complete || !img.naturalWidth) return null
+		if (!img || !this.gl || this.gl.isContextLost() || !img.complete || !img.naturalWidth) return null
 		if (S.tex.has(img.src)) return touchCache(S.tex, img.src)
 		const gl = this.gl
 		const t = gl.createTexture()
@@ -269,7 +323,7 @@ const GL = {
 	},
 	draw({ front, back, fold, dir = 1, page = S.sizes, viewport = S.sizes }) {
 		const gl = this.gl
-		if (!gl || !front || !back || !fold) return
+		if (!gl || gl.isContextLost() || !front || !back || !fold) return
 		const dpr = Math.min(window.devicePixelRatio || 1, 2)
 		const cw = Math.max(1, Math.round(viewport.w * dpr))
 		const ch = Math.max(1, Math.round(viewport.h * dpr))
@@ -292,16 +346,11 @@ const GL = {
 			gl.uniform2f(this.shadowU.uFoldPoint, fold.point.x, fold.point.y)
 			gl.uniform2f(this.shadowU.uFoldNormal, fold.normal.x, fold.normal.y)
 			gl.uniform1f(this.shadowU.uRadius, fold.radius)
-			gl.bindBuffer(gl.ARRAY_BUFFER, this.shadowBuf)
-			gl.enableVertexAttribArray(this.shadowLoc)
-			gl.vertexAttribPointer(this.shadowLoc, 2, gl.FLOAT, false, 0, 0)
+			gl.bindVertexArray(this.shadowVao)
 			gl.drawArrays(gl.TRIANGLES, 0, 6)
-			gl.disableVertexAttribArray(this.shadowLoc)
 		}
 		gl.useProgram(this.prog)
-		gl.bindBuffer(gl.ARRAY_BUFFER, this.pageBuf)
-		gl.enableVertexAttribArray(this.pageLoc)
-		gl.vertexAttribPointer(this.pageLoc, 2, gl.FLOAT, false, 0, 0)
+		gl.bindVertexArray(this.pageVao)
 		gl.enable(gl.DEPTH_TEST)
 		gl.depthFunc(gl.LEQUAL)
 		gl.depthMask(true)
@@ -317,8 +366,8 @@ const GL = {
 		gl.bindTexture(gl.TEXTURE_2D, front)
 		gl.activeTexture(gl.TEXTURE1)
 		gl.bindTexture(gl.TEXTURE_2D, back)
-		gl.drawArrays(gl.TRIANGLES, 0, this.count)
-		gl.disableVertexAttribArray(this.pageLoc)
+		gl.drawElements(gl.TRIANGLES, this.indexCount, gl.UNSIGNED_SHORT, 0)
+		gl.bindVertexArray(null)
 	},
 }
 
@@ -388,9 +437,17 @@ function trimCache(cache, limit, dispose = () => {}) {
 	}
 }
 
-function loadImg(src) {
+function findCachedImg(src) {
+	for (const cache of [S.imgCache, S.thumbCache, S.largeCache]) {
+		if (cache.has(src)) return touchCache(cache, src)
+	}
+	return null
+}
+
+function loadImg(src, cache = S.imgCache, limit = S.imgCacheLimit) {
 	if (!src) return Promise.resolve(null)
-	if (S.imgCache.has(src)) return Promise.resolve(touchCache(S.imgCache, src))
+	const hit = findCachedImg(src)
+	if (hit) return Promise.resolve(hit)
 	if (S.pendingImg.has(src)) return S.pendingImg.get(src)
 	const p = new Promise((resolve) => {
 		const img = new Image()
@@ -405,12 +462,12 @@ function loadImg(src) {
 			img.onerror = null
 			S.pendingImg.delete(src)
 			if (loaded) {
-				S.imgCache.set(src, img)
-				trimCache(S.imgCache, 16)
+				cache.set(src, img)
+				trimCache(cache, limit)
 			}
 			resolve(loaded ? img : null)
 		}
-		const timeout = setTimeout(() => finish(false), 4000)
+		const timeout = setTimeout(() => finish(false), 8000)
 		img.onload = () => finish(true)
 		img.onerror = () => finish(false)
 		img.src = src
@@ -419,28 +476,77 @@ function loadImg(src) {
 	return p
 }
 
-function preloadNearby() {
-	for (const d of [-3, -2, -1, 1, 2, 3]) {
-		const s = spreadPages(S.spread + d)
-		;[s.left, s.right].forEach((n) => n && loadImg(pageUrl(n)))
-	}
+function idleWait(ms = 60) {
+	return new Promise((resolve) => {
+		if (typeof requestIdleCallback === 'function') requestIdleCallback(() => resolve(), { timeout: ms + 120 })
+		else setTimeout(resolve, ms)
+	})
 }
 
-// фоновая предзагрузка всей книги: страницы почти всегда уже в кэше к моменту листания
-function preloadAll() {
-	S.mf.pages.forEach((p, i) => setTimeout(() => {
-		if (!S.mf) return
-		loadImg(safeUrl(p.thumb))
-		loadImg(pageUrl(p.index))
-	}, 400 + i * 150))
+function waitImageDisplay(im) {
+	if (!im || !im.getAttribute('src') || (im.complete && im.naturalWidth > 0)) return Promise.resolve()
+	return new Promise((resolve) => {
+		const done = () => {
+			im.removeEventListener('load', done)
+			im.removeEventListener('error', done)
+			resolve()
+		}
+		im.addEventListener('load', done, { once: true })
+		im.addEventListener('error', done, { once: true })
+	})
+}
+
+// Умная предзагрузка от текущего разворота наружу — не вытесняет соседние страницы из кэша
+async function schedulePreload() {
+	if (!S.mf) return
+	const token = ++S.preloadToken
+	await Promise.all([$('#imgLeft'), $('#imgRight')].map(waitImageDisplay))
+	if (token !== S.preloadToken || !S.mf) return
+
+	const conn = navigator.connection
+	const lowData = Boolean(conn && (conn.saveData || conn.effectiveType === 'slow-2g' || conn.effectiveType === '2g'))
+	const perSpread = S.single ? 1 : 2
+	const total = maxSpread()
+	const maxDist = lowData ? 1 : Math.min(total, Math.max(3, Math.floor((S.imgCacheLimit - 2) / (2 * perSpread))))
+
+	// Сначала гарантируем загрузку текущего разворота в кэш и прогреваем текстуры для мгновенного старта анимации
+	const cur = spreadPages(S.spread)
+	for (const n of [cur.left, cur.right]) {
+		if (!n) continue
+		const img = await loadImg(pageUrl(n))
+		if (token !== S.preloadToken || !S.mf) return
+		if (img && GL.gl) GL.texture(img)
+	}
+
+	const queue = []
+	for (let d = 1; d <= maxDist; d++) {
+		if (S.spread + d <= total) queue.push(S.spread + d)
+		if (S.spread - d >= 0) queue.push(S.spread - d)
+	}
+
+	for (let i = 0; i < queue.length; i++) {
+		if (token !== S.preloadToken || !S.mf) return
+		const sp = spreadPages(queue[i])
+		const tasks = []
+		for (const n of [sp.left, sp.right]) {
+			if (!n) continue
+			tasks.push(loadImg(safeUrl(S.mf.pages[n - 1]?.thumb), S.thumbCache, 64))
+			tasks.push(loadImg(pageUrl(n)).then((img) => {
+				if (i < 2 && img && GL.gl && token === S.preloadToken) GL.texture(img)
+			}))
+		}
+		await Promise.all(tasks)
+		await idleWait(lowData ? 160 : 50)
+	}
 }
 
 // текстура для старта анимации: HD из кэша или лёгкое превью — без ожидания сети
 function pageTex(n) {
 	const src = pageUrl(n)
-	if (src && S.imgCache.has(src)) return loadImg(src)
+	const cached = src && findCachedImg(src)
+	if (cached) return Promise.resolve(cached)
 	const t = safeUrl(S.mf.pages[n - 1]?.thumb)
-	return t ? loadImg(t) : Promise.resolve(null)
+	return t ? loadImg(t, S.thumbCache, 64) : Promise.resolve(null)
 }
 
 function layout() {
@@ -479,15 +585,40 @@ function setImage(el, n) {
 	const key = String(n || '')
 	if (el.dataset.page === key) return
 	el.dataset.page = key
+	delete el.dataset.tier
+	delete el.dataset.upgrading
 	if (n) {
 		// лёгкое мини-превью видно сразу, HD-страница догружается поверх
-		el.style.backgroundImage = 'url("' + (safeUrl(S.mf.pages[n - 1].thumb) || '') + '")'
+		const thumb = safeUrl(S.mf.pages[n - 1].thumb)
+		el.style.backgroundImage = thumb ? 'url("' + thumb + '")' : ''
 		el.src = pageUrl(n)
+		el.dataset.tier = 'normal'
 		el.style.visibility = 'visible'
 	} else {
 		el.style.backgroundImage = ''
 		el.removeAttribute('src')
 		el.style.visibility = 'hidden'
+	}
+}
+
+function upgradeVisibleToLarge() {
+	if (!S.mf) return
+	for (const el of [$('#imgLeft'), $('#imgRight')]) {
+		const n = Number(el.dataset.page)
+		if (!n || el.dataset.tier === 'large' || el.dataset.upgrading === String(n)) continue
+		const largeSrc = pageUrl(n, 'large')
+		if (!largeSrc || largeSrc === el.src) {
+			el.dataset.tier = 'large'
+			continue
+		}
+		el.dataset.upgrading = String(n)
+		loadImg(largeSrc, S.largeCache, 8).then((img) => {
+			if (el.dataset.page !== String(n)) return
+			delete el.dataset.upgrading
+			if (!img) return
+			el.src = largeSrc
+			el.dataset.tier = 'large'
+		})
 	}
 }
 
@@ -499,7 +630,6 @@ function renderSpread() {
 	book.classList.toggle('cover-front', !S.single && S.spread === 0)
 	book.classList.toggle('cover-back', !S.single && S.spread >= maxSpread() && !right)
 	book.classList.toggle('has-left', Boolean(left))
-	book.style.transform = 'none'
 	const coverOffset = S.single ? 0 : !left ? -0.25 : !right ? 0.25 : 0
 	book.style.left = Math.round(book.offsetWidth * coverOffset) + 'px'
 	if (![left, right].includes(S.currentPage)) S.currentPage = right || left || 1
@@ -507,14 +637,15 @@ function renderSpread() {
 	renderOverlays(left, right)
 	$('#pageInput').value = cur
 	if (!EMBED) history.replaceState(null, '', '#p=' + cur)
-	document.querySelectorAll('#thumbList img').forEach((im) => {
-		im.classList.toggle('cur', Number(im.dataset.page) === cur)
-	})
+	if (S.curThumb) S.curThumb.classList.remove('cur')
+	const nextThumb = $('#thumbList')?.querySelector('img[data-page="' + cur + '"]')
+	if (nextThumb) nextThumb.classList.add('cur')
+	S.curThumb = nextThumb || null
 	const navLeft = $('#navLeft')
 	const navRight = $('#navRight')
 	if (navLeft) navLeft.style.opacity = S.spread > 0 ? '1' : '0.25'
 	if (navRight) navRight.style.opacity = S.spread < maxSpread() ? '1' : '0.25'
-	preloadNearby()
+	schedulePreload()
 }
 
 function pauseMedia() {
@@ -633,9 +764,11 @@ function applySettings() {
 	$('.tab[data-tab="toc"]').hidden = !hasToc
 	document.querySelectorAll('[data-act="panel"]').forEach((el) => { el.hidden = !(thumbsEnabled || hasToc) })
 	switchTab(hasToc ? 'toc' : 'thumbs')
-		$('#pageInput').setAttribute('aria-label', 'Текущая страница')
-		document.querySelectorAll('#toolbar button').forEach((button) => button.setAttribute('aria-label', button.title))
-		if (STATIC) $('#shareQr').hidden = true
+	$('#pageInput').setAttribute('aria-label', 'Текущая страница')
+	document.querySelectorAll('#toolbar button').forEach((button) => button.setAttribute('aria-label', button.title))
+	if (STATIC) $('#shareQr').hidden = true
+	const canFullscreen = Boolean(document.fullscreenEnabled || document.webkitFullscreenEnabled || document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen)
+	if (!canFullscreen) document.querySelectorAll('[data-act="full"]').forEach((el) => { el.hidden = true })
 }
 
 let glHideToken = 0
@@ -645,21 +778,19 @@ function finishTurn() {
 	if (S.layoutPending) layout()
 	renderSpread()
 	// не гасим WebGL-кадр, пока страницы разворота не проявились — иначе виден скачок на мини-превью
-	const token = ++glHideToken
-	const started = performance.now()
-	const waitHide = () => {
-		if (token !== glHideToken || S.animating || S.dragging) {
-			clearInterval(iv)
-			return
-		}
-		const loading = [$('#imgLeft'), $('#imgRight')].some((im) => im.getAttribute('src') && (!im.complete || !im.naturalWidth))
-		if (!loading || performance.now() - started > 2500) {
-			clearInterval(iv)
-			$('#gl').classList.remove('on')
-		}
+	const imgs = [$('#imgLeft'), $('#imgRight')]
+	const ready = imgs.every((im) => !im.getAttribute('src') || (im.complete && im.naturalWidth > 0))
+	if (ready) {
+		$('#gl').classList.remove('on')
+		return
 	}
-	const iv = setInterval(waitHide, 100)
-	waitHide()
+	const token = ++glHideToken
+	const allReady = Promise.all(imgs.map(waitImageDisplay))
+	const timeout = new Promise((resolve) => setTimeout(resolve, 2500))
+	Promise.race([allReady, timeout]).then(() => {
+		if (token !== glHideToken || S.animating || S.dragging) return
+		$('#gl').classList.remove('on')
+	})
 }
 
 function setSpread(target) {
@@ -896,7 +1027,8 @@ function prepareUnderlay(forward, target) {
 }
 
 async function flip(forward, opts = {}) {
-	if (S.animating || S.dragging || S.pinch) return
+	if (S.animating || S.dragging || Pinch.active) return
+	if (S.pinch) Pinch.reset()
 	const target = S.spread + (forward ? 1 : -1)
 	if (target < 0 || target > maxSpread()) return
 	const cur = spreadPages(S.spread)
@@ -948,6 +1080,7 @@ async function flip(forward, opts = {}) {
 
 function goToPage(n) {
 	if (S.animating || S.dragging) return
+	if (S.pinch) Pinch.reset()
 	Hover.cancel()
 	const page = clamp(Math.floor(Number(n) || 1), 1, S.mf.pageCount)
 	S.currentPage = page
@@ -1078,99 +1211,213 @@ const Hover = {
 	},
 }
 
-// Пинч-зум на сенсорных экранах: два пальца — 100–300%, один палец — панорама, возврат в 100% сжатием
+// Пинч-зум с сохранением фокуса (100–400%), панорама одним пальцем/мышью и сброс двойным тапом/кликом
 const Pinch = {
 	pointers: new Map(),
 	active: false,
+	panning: false,
+	panPointerId: null,
 	scale: 1,
 	startDist: 1,
 	startScale: 1,
 	startCenter: null,
+	origin: null,
 	basePan: null,
 	pan: { x: 0, y: 0 },
 	lastPoint: null,
+	tapStart: null,
+	lastTap: null,
+	touchList() {
+		const list = []
+		for (const p of this.pointers.values()) if (p.type !== 'mouse') list.push(p)
+		return list
+	},
+	bookOrigin() {
+		const r = $('#book').getBoundingClientRect()
+		return {
+			x: r.left + r.width * 0.5 - this.pan.x,
+			y: r.top + r.height * 0.5 - this.pan.y,
+		}
+	},
 	reset() {
 		this.scale = 1
 		this.pan = { x: 0, y: 0 }
 		this.active = false
+		this.panning = false
+		this.panPointerId = null
 		this.lastPoint = null
+		this.tapStart = null
 		S.pinch = false
 		this.apply()
 	},
 	apply() {
 		const book = $('#book')
-		if (this.scale > 1.02) {
+		const zoomBtn = $('[data-act="zoom"]')
+		if (this.scale > 1.01) {
 			const stage = $('#stage')
-			const lim = stage.clientWidth * 0.75
-			this.pan.x = clamp(this.pan.x, -lim, lim)
-			this.pan.y = clamp(this.pan.y, -lim, lim)
+			const bw = book.offsetWidth
+			const bh = book.offsetHeight
+			const sw = stage.clientWidth
+			const sh = stage.clientHeight
+			const edgePad = 24 * clamp((this.scale - 1) / 0.3, 0, 1)
+			const limX = Math.max(bw * (this.scale - 1) * 0.5, (bw * this.scale - sw) * 0.5 + edgePad, 0)
+			const limY = Math.max(bh * (this.scale - 1) * 0.5, (bh * this.scale - sh) * 0.5 + edgePad, 0)
+			this.pan.x = clamp(this.pan.x, -limX, limX)
+			this.pan.y = clamp(this.pan.y, -limY, limY)
 			book.classList.add('pinch')
 			book.style.setProperty('--pinch-s', this.scale.toFixed(3))
 			book.style.setProperty('--pinch-x', this.pan.x.toFixed(1) + 'px')
 			book.style.setProperty('--pinch-y', this.pan.y.toFixed(1) + 'px')
 			S.pinch = true
+			if (zoomBtn) {
+				zoomBtn.classList.add('active')
+				zoomBtn.setAttribute('aria-pressed', 'true')
+			}
+			if (this.scale > 1.15) upgradeVisibleToLarge()
 		} else {
 			book.classList.remove('pinch')
 			book.style.removeProperty('--pinch-s')
 			book.style.removeProperty('--pinch-x')
 			book.style.removeProperty('--pinch-y')
 			S.pinch = false
+			if (zoomBtn) {
+				zoomBtn.classList.remove('active')
+				zoomBtn.setAttribute('aria-pressed', 'false')
+			}
 		}
 	},
+	zoomAt(nextScale, clientX, clientY) {
+		const s0 = this.scale
+		const s1 = clamp(nextScale, 1, 4)
+		if (s1 <= 1.01) {
+			this.reset()
+			return
+		}
+		const o = this.bookOrigin()
+		const ratio = s1 / s0
+		this.scale = s1
+		this.pan.x = (clientX - o.x) - (clientX - o.x - this.pan.x) * ratio
+		this.pan.y = (clientY - o.y) - (clientY - o.y - this.pan.y) * ratio
+		this.apply()
+	},
 	dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y) },
+	beginPinch(stage) {
+		const [a, b] = this.touchList()
+		if (!a || !b) return
+		this.active = true
+		this.panning = false
+		this.panPointerId = null
+		this.tapStart = null
+		this.startDist = Math.max(1, this.dist(a, b))
+		this.startScale = this.scale
+		this.startCenter = { x: (a.x + b.x) * 0.5, y: (a.y + b.y) * 0.5 }
+		this.origin = this.bookOrigin()
+		this.basePan = { x: this.pan.x, y: this.pan.y }
+		stage.dispatchEvent(new Event('flipvio-cancel-drag'))
+		Hover.cancel()
+	},
 	init() {
 		const stage = $('#stage')
 		stage.addEventListener('pointerdown', (e) => {
-			if (e.pointerType === 'mouse') return
-			this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
-			if (this.pointers.size === 2 && !S.animating) {
-				const [a, b] = [...this.pointers.values()]
-				this.active = true
-				this.startDist = Math.max(1, this.dist(a, b))
-				this.startScale = this.scale
-				this.startCenter = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
-				this.basePan = { ...this.pan }
-				stage.dispatchEvent(new Event('flipvio-cancel-drag'))
-				Hover.cancel()
+			if (e.pointerType === 'mouse' && (this.scale <= 1.01 || e.button !== 0)) return
+			if (e.target.closest('button, input, a, video, audio, .interactive')) return
+			this.pointers.set(e.pointerId, { id: e.pointerId, x: e.clientX, y: e.clientY, type: e.pointerType })
+			const touches = this.touchList()
+			if (touches.length === 2 && !S.animating) {
+				this.beginPinch(stage)
+			} else if (!this.active && this.scale > 1.01 && (e.pointerType === 'mouse' || touches.length === 1)) {
+				this.panning = true
+				this.panPointerId = e.pointerId
+				this.lastPoint = { x: e.clientX, y: e.clientY }
+				this.tapStart = e.pointerType !== 'mouse' ? { id: e.pointerId, x: e.clientX, y: e.clientY, time: performance.now(), moved: false } : null
 			}
 		})
 		window.addEventListener('pointermove', (e) => {
-			if (!this.pointers.has(e.pointerId)) return
-			this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
-			if (this.active && this.pointers.size >= 2) {
-				const [a, b] = [...this.pointers.values()]
-				this.scale = clamp(this.startScale * this.dist(a, b) / this.startDist, 1, 3)
-				const c = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
-				this.pan.x = this.basePan.x + (c.x - this.startCenter.x)
-				this.pan.y = this.basePan.y + (c.y - this.startCenter.y)
+			const entry = this.pointers.get(e.pointerId)
+			if (!entry) return
+			entry.x = e.clientX
+			entry.y = e.clientY
+			const touches = this.touchList()
+			if (this.active && touches.length >= 2) {
+				const [a, b] = touches
+				const nextScale = clamp(this.startScale * (this.dist(a, b) / this.startDist), 1, 4)
+				const c = { x: (a.x + b.x) * 0.5, y: (a.y + b.y) * 0.5 }
+				const ratio = nextScale / this.startScale
+				this.scale = nextScale
+				this.pan.x = (c.x - this.origin.x) - (this.startCenter.x - this.origin.x - this.basePan.x) * ratio
+				this.pan.y = (c.y - this.origin.y) - (this.startCenter.y - this.origin.y - this.basePan.y) * ratio
 				this.lastPoint = null
 				this.apply()
-			} else if (!this.active && this.scale > 1 && this.pointers.size === 1) {
-				const p = [...this.pointers.values()][0]
+			} else if (!this.active && this.panning && e.pointerId === this.panPointerId && this.scale > 1.01) {
+				if (this.tapStart && this.tapStart.id === e.pointerId && Math.hypot(e.clientX - this.tapStart.x, e.clientY - this.tapStart.y) > 8) {
+					this.tapStart.moved = true
+				}
 				if (this.lastPoint) {
-					this.pan.x += p.x - this.lastPoint.x
-					this.pan.y += p.y - this.lastPoint.y
+					this.pan.x += e.clientX - this.lastPoint.x
+					this.pan.y += e.clientY - this.lastPoint.y
 					this.apply()
 				}
-				this.lastPoint = p
+				this.lastPoint = { x: e.clientX, y: e.clientY }
 			}
 		})
 		const up = (e) => {
 			if (!this.pointers.delete(e.pointerId)) return
-			if (this.pointers.size === 1) {
-				// остался один палец — переходим в панорамирование
-				this.active = false
-				this.lastPoint = [...this.pointers.values()][0]
+			const touches = this.touchList()
+			if (this.active) {
+				if (touches.length === 1) {
+					// остался один палец — переходим в панорамирование
+					this.active = false
+					if (this.scale > 1.01) {
+						this.panning = true
+						this.panPointerId = touches[0].id
+						this.lastPoint = { x: touches[0].x, y: touches[0].y }
+					}
+				} else if (touches.length === 0) {
+					this.active = false
+					this.panning = false
+					this.panPointerId = null
+					this.lastPoint = null
+					if (this.scale <= 1.02) this.reset()
+				}
+				return
 			}
-			if (this.pointers.size === 0) {
-				this.active = false
+			if (e.pointerId === this.panPointerId) {
+				this.panning = false
+				this.panPointerId = null
 				this.lastPoint = null
-				if (this.scale <= 1.02) this.reset()
 			}
+			if (e.type !== 'pointercancel' && this.tapStart && this.tapStart.id === e.pointerId && !this.tapStart.moved && this.scale > 1.01) {
+				const now = performance.now()
+				if (this.lastTap && now - this.lastTap.time < 300 && Math.hypot(e.clientX - this.lastTap.x, e.clientY - this.lastTap.y) < 28) {
+					this.lastTap = null
+					this.tapStart = null
+					this.reset()
+					return
+				}
+				this.lastTap = { x: e.clientX, y: e.clientY, time: now }
+			}
+			if (this.tapStart && this.tapStart.id === e.pointerId) this.tapStart = null
+			if (this.pointers.size === 0 && this.scale <= 1.02 && (S.pinch || this.scale !== 1)) this.reset()
 		}
 		window.addEventListener('pointerup', up)
 		window.addEventListener('pointercancel', up)
-		stage.addEventListener('dblclick', () => { if (this.scale > 1) this.reset() })
+		window.addEventListener('blur', () => {
+			this.pointers.clear()
+			this.active = false
+			this.panning = false
+			this.panPointerId = null
+			this.lastPoint = null
+			this.tapStart = null
+		})
+		stage.addEventListener('dblclick', () => { if (this.scale > 1.01) this.reset() })
+		stage.addEventListener('wheel', (e) => {
+			if (S.animating || S.dragging) return
+			if (e.ctrlKey || e.metaKey || this.scale > 1.01) {
+				e.preventDefault()
+				const factor = Math.exp(-e.deltaY * 0.0025)
+				this.zoomAt(this.scale * factor, e.clientX, e.clientY)
+			}
+		}, { passive: false })
 	},
 }
 
@@ -1215,6 +1462,23 @@ function initDrag() {
 			last: { x: startInfo.grab.x, y: startInfo.grab.y },
 			moved: true,
 		}
+		// Подтягиваем HD-текстуру прямо во время перетаскивания, если старт был с превью
+		loadImg(pageUrl(frontPage)).then((img) => {
+			if (!img || !drag || drag.target !== target) return
+			const tex = GL.texture(img)
+			if (tex) {
+				drag.front = tex
+				if (drag.fold) drawFold(drag.fold, drag.front, drag.back, drag.forward ? 1 : -1)
+			}
+		})
+		loadImg(pageUrl(backPage || frontPage)).then((img) => {
+			if (!img || !drag || drag.target !== target) return
+			const tex = GL.texture(img)
+			if (tex) {
+				drag.back = tex
+				if (drag.fold) drawFold(drag.fold, drag.front, drag.back, drag.forward ? 1 : -1)
+			}
+		})
 		if (lastEvent) {
 			drag.last = pagePoint(lastEvent, drag.rect, drag.forward)
 			drag.fold = foldFromDrag(drag.grab, drag.last)
@@ -1282,9 +1546,8 @@ function initDrag() {
 		drag = null
 		lastEvent = null
 		S.dragging = false
-		if (S.pinch) {
-			// жест прерван пинч-зумом — аккуратно возвращаем лист
-			if (d) settle(d, false)
+		if (S.pinch || Pinch.active) {
+			if (d && !Pinch.active) settle(d, false)
 			return
 		}
 		if (!d || !d.moved) {
@@ -1306,7 +1569,19 @@ function initDrag() {
 	}
 
 	$('#stage').addEventListener('flipvio-cancel-drag', () => {
-		if (startInfo) onUp({ type: 'pointercancel', pointerId: startInfo.pointerId })
+		window.removeEventListener('pointermove', onMove)
+		window.removeEventListener('pointerup', onUp)
+		window.removeEventListener('pointercancel', onUp)
+		const wasDragging = Boolean(drag)
+		startInfo = null
+		drag = null
+		lastEvent = null
+		S.dragging = false
+		if (wasDragging) {
+			pendingDraw = null
+			canvas.classList.remove('on')
+			renderSpread()
+		}
 	})
 	book.addEventListener('pointermove', (e) => {
 		if (!startInfo && !S.dragging && !S.animating) Hover.check(e, book)
@@ -1318,7 +1593,7 @@ function initDrag() {
 		}
 	})
 	book.addEventListener('pointerdown', (e) => {
-		if (S.animating || S.pinch || startInfo || e.button !== 0 || e.isPrimary === false || e.target.closest('button, input, a, video, audio, .interactive')) return
+		if (S.animating || S.pinch || Pinch.active || startInfo || e.button !== 0 || e.isPrimary === false || e.target.closest('button, input, a, video, audio, .interactive')) return
 		const r = book.getBoundingClientRect()
 		const x = (e.clientX - r.left) / r.width
 		const forward = S.single ? x >= 0.35 : x >= 0.5
@@ -1343,6 +1618,7 @@ function initDrag() {
 function buildThumbs() {
 	const list = $('#thumbList')
 	list.innerHTML = ''
+	S.curThumb = null
 	S.mf.pages.forEach((p) => {
 		const img = new Image()
 		img.loading = 'lazy'
@@ -1360,15 +1636,16 @@ function buildThumbs() {
 
 function openZoom() {
 	pauseMedia()
-	const n = S.currentPage
-	$('#zoomImg').src = pageUrl(n, 'large')
-	const el = $('#zoomView')
-	el.removeAttribute('hidden')
-	el.classList.add('open')
-	el.style.setProperty('display', 'block', 'important')
+	if (Pinch.scale > 1.01) {
+		Pinch.reset()
+		return
+	}
+	const o = Pinch.bookOrigin()
+	Pinch.zoomAt(2.25, o.x, o.y)
 }
 
 function closeZoom() {
+	if (Pinch.scale > 1.01) Pinch.reset()
 	const el = $('#zoomView')
 	el.setAttribute('hidden', '')
 	el.classList.remove('open')
@@ -1477,6 +1754,7 @@ function initUi() {
 		if (act === 'qr') openQr()
 		if (act === 'auto') toggleAuto()
 		if (act === 'single') {
+			if (S.pinch) Pinch.reset()
 			S.mf.settings.singlePageMode = S.single ? 'never' : 'always'
 			layout()
 			renderSpread()
@@ -1490,8 +1768,11 @@ function initUi() {
 		if (act === 'print' && S.mf.settings.allowPrint !== false) window.print()
 		if (act === 'download' && S.mf.settings.allowDownload !== false && safeUrl(S.mf.pdfUrl)) location.href = safeUrl(S.mf.pdfUrl)
 		if (act === 'full') {
-			if (document.fullscreenElement) document.exitFullscreen()
-			else document.documentElement.requestFullscreen()
+			const doc = document
+			const el = doc.documentElement
+			const fsEl = doc.fullscreenElement || doc.webkitFullscreenElement
+			if (fsEl) (doc.exitFullscreen || doc.webkitExitFullscreen)?.call(doc)?.catch?.(() => {})
+			else (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el)?.catch?.(() => {})
 		}
 	})
 	$('#pageInput').addEventListener('keydown', (e) => {
@@ -1550,7 +1831,10 @@ function initUi() {
 		clearTimeout(resizeTimer)
 		resizeTimer = setTimeout(() => {
 			layout()
-			if (!S.animating && !S.dragging) renderSpread()
+			if (!S.animating && !S.dragging) {
+				renderSpread()
+				if (Pinch.scale > 1.01) Pinch.apply()
+			}
 		}, 80)
 	})
 	window.addEventListener('hashchange', () => {
@@ -1562,6 +1846,7 @@ function initUi() {
 async function init() {
 	const initialHash = location.hash.match(/#p=(\d+)/)
 	try {
+		S.imgCacheLimit = IS_MOBILE() ? 20 : 36
 		const res = await fetch(STATIC ? MANIFEST_URL : '/api/books/' + encodeURIComponent(slug))
 		if (!res.ok) throw new Error('Не удалось загрузить книгу: ' + res.status)
 		S.mf = await res.json()
@@ -1580,7 +1865,6 @@ async function init() {
 		initUi()
 		if (initialHash) goToPage(parseInt(initialHash[1], 10))
 		else renderSpread()
-		preloadAll()
 	} catch (err) {
 		console.error(err)
 		const message = document.createElement('p')
@@ -1593,4 +1877,4 @@ async function init() {
 
 document.addEventListener('DOMContentLoaded', init)
 
-if (!window.__flipvio) window.__flipvio = { S, Sfx, Hover, GL, foldFromDrag, restFold, finalFold }
+if (!window.__flipvio) window.__flipvio = { S, Sfx, Hover, GL, Pinch, foldFromDrag, restFold, finalFold }

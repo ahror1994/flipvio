@@ -8,7 +8,7 @@ const fs = await import('node:fs')
 const path = await import('node:path')
 
 // постоянные короткие адреса на Pages: префикс слага -> имя
-const NAMES = [['суши', 'sushi'], ['каталог', 'catalog-2026'], ['коммерческое', 'kp'], ['01', '01']]
+const NAMES = [['суши', 'sushi'], ['01', '01']]
 
 const api = (p) => base.replace(/\/$/, '') + p
 const loginRes = await fetch(api('/api/login'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ login, password }) })
@@ -76,7 +76,8 @@ fs.writeFileSync(path.join(ROOT, 'index.html'), `<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Публикации</title><link rel="stylesheet" href="./assets/viewer.css">
 <style>
-body { display: flex; min-height: 100vh; align-items: center; justify-content: center; background: radial-gradient(120% 120% at 50% 10%, #2b2b2b, #161616); user-select: none; }
+html, body { height: auto; min-height: 100dvh; overflow-y: auto; }
+body { display: flex; min-height: 100vh; padding: 24px 0; align-items: center; justify-content: center; background: radial-gradient(120% 120% at 50% 10%, #2b2b2b, #161616); user-select: none; }
 main { width: min(560px, 92vw); }
 h1 { color: #eee; font-weight: 600; letter-spacing: .02em; }
 .card { display: flex; justify-content: space-between; gap: 12px; padding: 16px 18px; margin: 10px 0; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); border-radius: 12px; color: #eee; text-decoration: none; transition: background .15s, transform .15s; }

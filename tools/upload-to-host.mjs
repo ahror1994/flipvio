@@ -8,13 +8,7 @@ const path = await import('node:path')
 const db = JSON.parse(fs.readFileSync(new URL('../storage/db.json', import.meta.url), 'utf8'))
 
 // какие книги и с какими короткими адресами публикуем на хостинге
-const PLAN = [
-  { localSlug: 'каталог-2026-тест-d259ac', slug: 'каталог-2026-тест', toc: [
-    { title: 'салаты', pageId: 'page-24' },
-    { title: 'салаты', pageId: 'page-21' },
-  ] },
-  { localSlug: 'коммерческое-предложение-и-договор-на-ра-a79d9a', slug: 'коммерческое-предложение' },
-]
+const PLAN = []
 
 const api = (p) => base.replace(/\/$/, '') + p
 const loginRes = await fetch(api('/api/login'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ login, password }) })
